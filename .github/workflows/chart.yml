@@ -103,15 +103,10 @@ jobs:
             -f "$CHART/ci/tracing-values.yaml" \
             | kubeconform -strict -summary -ignore-missing-schemas -kubernetes-version 1.31.0 -
 
-      - name: Check documented values match values.yaml
-        run: |
-          set -euo pipefail
-          missing=0
-          # Every top-level key must appear in the chart README.
-          for key in $(helm show values "$CHART" | grep -E '^[a-zA-Z]' | cut -d: -f1 | sort -u); do
-            if ! grep -q "\`$key\." "$CHART/README.md" && ! grep -q "\`$key\`" "$CHART/README.md"; then
-              echo "undocumented top-level value: $key"
-              missing=1
-            fi
-          done
-          exit "$missing"
+      # No "every top-level value must appear in a README table" check here
+      # (unlike helm-mirofish): this chart's own documented convention is
+      # "see values.yaml, every key has an explanatory comment" (see
+      # README.md's "Values reference" section) rather than a duplicated
+      # doc table that has to be kept in sync by hand - so there's nothing
+      # for that check to enforce here without fighting the chart's own
+      # chosen style.

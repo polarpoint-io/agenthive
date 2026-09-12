@@ -277,6 +277,22 @@ step for a guided first look. Verified against a real Jaeger instance
 during development, not just the console exporter - see `ADR.md`'s "v3"
 section.
 
+## Token expiry and trace sampling
+
+Both closed as of v4 (see `ADR.md`'s "v4" section):
+
+- **`AGENTHIVE_TOKEN_TTL_SECONDS`** (default `0`, never expires - the
+  original behavior). Set it and every token minted or rotated from then
+  on expires automatically; an expired token fails auth exactly like a
+  revoked one. Existing tokens keep working until next rotated - turning
+  this on doesn't retroactively lock anyone out.
+- **`AGENTHIVE_TRACE_SAMPLE_RATIO`** (default `1.0` - trace everything,
+  same as before). Head-based sampling: the decision is made once per
+  trace, and every child span inherits it, so a sampled-in request is
+  never left with a partial trace.
+
+See `DEPLOYMENT.md`'s environment variable table for both.
+
 ## What's deliberately not here yet
 
 See `ADR.md`'s "Open questions" section in full, but the short version:
@@ -286,15 +302,14 @@ See `ADR.md`'s "Open questions" section in full, but the short version:
   limited real usage data is still premature.
 - **No LLM-request proxy.** This was a deliberate choice, not a missing
   feature - see `ADR.md`'s "Why not build an LLM-request proxy" section.
-- **No token expiry policy**, and the Redis rate limiter is a fixed
-  window, not a true sliding window - see `DEPLOYMENT.md`'s "Known
-  limitations". TLS and multi-node rate-limit/cache sharing, both
-  flagged as gaps in v1, are closed as of v2 (native TLS support, and
-  Redis-backed shared state) - see `ADR.md`'s "v2" section.
-- **No trace sampling policy.** When tracing is enabled, every request is
-  traced (no head-based sampling knob yet) - fine at the traffic this
-  service sees today, worth revisiting before a very high-throughput
-  deployment turns it on. See `ADR.md`'s "v3" section.
+  Closing this "gap" would mean reversing the reason AgentHive is shaped
+  the way it is, not finishing it.
+
+The Redis rate limiter is also still a fixed window, not a true sliding
+window - see `DEPLOYMENT.md`'s "Known limitations". TLS, multi-node
+rate-limit/cache sharing (v2), token expiry, and trace sampling (v4) were
+all flagged as gaps at some point and are closed as of the version noted
+- see `ADR.md`.
 
 ## Files
 

@@ -101,6 +101,24 @@ def test_retrieval_span_carries_useful_attributes(live_server_tracing, client_li
     assert attrs["agenthive.neighborhood_count"] >= 1
 
 
+def test_sample_ratio_zero_suppresses_every_span(live_server_tracing_sampled_out, client_lib):
+    """AGENTHIVE_TRACE_SAMPLE_RATIO=0 (see config.py/tracing.py) means the
+    sampler drops every trace at the root span - the same write -> review
+    -> retrieve journey that reliably prints ~10 spans at the default
+    ratio (see the first test above) should print none."""
+    base_url, proc = live_server_tracing_sampled_out
+    data = client_lib.create_team(base_url, "Sampled Out Co")
+    team, owner = data["team"], data["user"]
+    admin = client_lib.TeamMemoryClient(base_url, owner["token"], team["id"])
+
+    node = admin.log_session(title="Never Sampled", body="testing ratio=0", tags=[])
+    admin.approve(node["id"])
+    admin.retrieve_context("Never Sampled")
+
+    time.sleep(0.2)
+    assert _read_spans(proc) == []
+
+
 def test_client_and_server_spans_share_a_trace_id_via_propagation(live_server_tracing):
     """The whole point of propagating traceparent (see tracing.py's
     inject_headers/extract_context) is that a client call and the server

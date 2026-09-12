@@ -37,7 +37,8 @@ CREATE TABLE IF NOT EXISTS users (
     created_at TEXT NOT NULL,
     created_by TEXT,
     last_used_at TEXT,
-    revoked_at TEXT
+    revoked_at TEXT,
+    token_expires_at TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_users_team ON users(team_id);
@@ -124,6 +125,21 @@ def now() -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
 
+def _token_expiry() -> str | None:
+    """None if AGENTHIVE_TOKEN_TTL_SECONDS is unset/0 (tokens never expire
+    on their own - see config.py), else an ISO-8601 UTC timestamp
+    `token_ttl_seconds` from now. Same sortable string format as now(), so
+    expiry is just a string comparison (see user_by_token) - no datetime
+    parsing, no timezone-across-backends concerns."""
+    from config import CONFIG
+
+    if CONFIG.token_ttl_seconds and CONFIG.token_ttl_seconds > 0:
+        return time.strftime(
+            "%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() + CONFIG.token_ttl_seconds)
+        )
+    return None
+
+
 # ---------------------------------------------------------------------------
 # Backends
 # ---------------------------------------------------------------------------
@@ -135,6 +151,14 @@ class SqliteBackend:
         self.path = path
         with self._conn() as conn:
             conn.executescript(SCHEMA)
+            # Additive migration for databases created before token_expires_at
+            # existed - CREATE TABLE IF NOT EXISTS above is a no-op against
+            # them. Safe to run on every startup: SQLite has no "ADD COLUMN
+            # IF NOT EXISTS", so the duplicate-column case is just ignored.
+            try:
+                conn.execute("ALTER TABLE users ADD COLUMN token_expires_at TEXT")
+            except sqlite3.OperationalError:
+                pass  # already has the column
 
     @contextmanager
     def _conn(self):
@@ -190,6 +214,9 @@ class PostgresBackend:
         with self._conn() as conn:
             with conn.cursor() as cur:
                 cur.execute(SCHEMA)
+                # Same additive migration as SqliteBackend - Postgres does
+                # support IF NOT EXISTS here, so no try/except needed.
+                cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS token_expires_at TEXT")
 
     @contextmanager
     def _conn(self):
@@ -268,14 +295,15 @@ class Store:
         )
         token = generate_token()
         user_id = new_id()
+        expires_at = _token_expiry()
         self.backend.execute(
-            "INSERT INTO users (id, team_id, name, role, token_hash, created_at, created_by) "
-            "VALUES (?, ?, ?, 'admin', ?, ?, 'bootstrap')",
-            (user_id, team_id, owner_name, hash_token(token), now()),
+            "INSERT INTO users (id, team_id, name, role, token_hash, created_at, created_by, token_expires_at) "
+            "VALUES (?, ?, ?, 'admin', ?, ?, 'bootstrap', ?)",
+            (user_id, team_id, owner_name, hash_token(token), now(), expires_at),
         )
         team = {"id": team_id, "name": name}
         user = {"id": user_id, "team_id": team_id, "name": owner_name,
-                "role": "admin", "token": token}
+                "role": "admin", "token": token, "token_expires_at": expires_at}
         return team, user
 
     def team_by_id(self, team_id: str):
@@ -290,16 +318,18 @@ class Store:
             raise ValueError("role must be 'admin' or 'member'")
         token = generate_token()
         user_id = new_id()
+        expires_at = _token_expiry()
         self.backend.execute(
-            "INSERT INTO users (id, team_id, name, role, token_hash, created_at, created_by) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (user_id, team_id, name, role, hash_token(token), now(), created_by),
+            "INSERT INTO users (id, team_id, name, role, token_hash, created_at, created_by, token_expires_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (user_id, team_id, name, role, hash_token(token), now(), created_by, expires_at),
         )
-        return {"id": user_id, "team_id": team_id, "name": name, "role": role, "token": token}
+        return {"id": user_id, "team_id": team_id, "name": name, "role": role,
+                "token": token, "token_expires_at": expires_at}
 
     def list_users(self, team_id: str):
         rows = self.backend.query_all(
-            "SELECT id, team_id, name, role, created_at, created_by, last_used_at, revoked_at "
+            "SELECT id, team_id, name, role, created_at, created_by, last_used_at, revoked_at, token_expires_at "
             "FROM users WHERE team_id = ? ORDER BY created_at",
             (team_id,),
         )
@@ -307,16 +337,22 @@ class Store:
 
     def get_user(self, user_id: str):
         row = self.backend.query_one(
-            "SELECT id, team_id, name, role, created_at, created_by, last_used_at, revoked_at "
+            "SELECT id, team_id, name, role, created_at, created_by, last_used_at, revoked_at, token_expires_at "
             "FROM users WHERE id = ?",
             (user_id,),
         )
         return row
 
     def user_by_token(self, token: str):
-        """Returns the active (non-revoked) user matching this token, else
-        None. Updates last_used_at on success. Constant-time-ish because
-        we hash first and compare by unique index, not by scanning."""
+        """Returns the active user matching this token, else None: not
+        revoked, AND (no expiry set OR expiry is still in the future - see
+        config.py's AGENTHIVE_TOKEN_TTL_SECONDS). An expired token fails
+        auth exactly like a revoked one, on purpose - server.py doesn't
+        need to know the difference, and not distinguishing the two in the
+        response avoids leaking which case applies to an attacker probing
+        a stolen token. Updates last_used_at on success. Constant-time-ish
+        because we hash first and compare by unique index, not by
+        scanning."""
         from auth import hash_token
 
         token_hash = hash_token(token)
@@ -324,6 +360,8 @@ class Store:
             "SELECT * FROM users WHERE token_hash = ? AND revoked_at IS NULL",
             (token_hash,),
         )
+        if row and row["token_expires_at"] and row["token_expires_at"] <= now():
+            return None
         if row:
             self.backend.execute(
                 "UPDATE users SET last_used_at = ? WHERE id = ?", (now(), row["id"])
@@ -334,11 +372,12 @@ class Store:
         from auth import generate_token, hash_token
 
         token = generate_token()
+        expires_at = _token_expiry()
         self.backend.execute(
-            "UPDATE users SET token_hash = ?, revoked_at = NULL WHERE id = ?",
-            (hash_token(token), user_id),
+            "UPDATE users SET token_hash = ?, revoked_at = NULL, token_expires_at = ? WHERE id = ?",
+            (hash_token(token), expires_at, user_id),
         )
-        return token
+        return token, expires_at
 
     def revoke_user(self, user_id: str):
         self.backend.execute(

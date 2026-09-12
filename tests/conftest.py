@@ -96,6 +96,37 @@ def live_server_rate_limited(tmp_path):
 
 
 @pytest.fixture()
+def live_server_token_ttl(tmp_path):
+    """Same as live_server, but AGENTHIVE_TOKEN_TTL_SECONDS=2 - every token
+    minted while this is running expires almost immediately, so
+    tests/test_auth.py can prove expiry is enforced without waiting
+    around for a realistic TTL. 2s (not 1s) leaves enough margin for a
+    couple of real HTTP round-trips to land before the window closes."""
+    port = _free_port()
+    db_path = str(tmp_path / "test.db")
+    env = dict(os.environ)
+    env["AGENTHIVE_RATE_LIMIT_PER_MINUTE"] = "100000"
+    env["AGENTHIVE_LOG_JSON"] = "true"
+    env["AGENTHIVE_TOKEN_TTL_SECONDS"] = "2"
+    proc = subprocess.Popen(
+        [sys.executable, "server.py", "--port", str(port), "--db", db_path,
+         "--host", "127.0.0.1"],
+        cwd=ROOT, env=env,
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+    )
+    base_url = f"http://127.0.0.1:{port}"
+    try:
+        _wait_for(base_url + "/healthz")
+        yield base_url
+    finally:
+        proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+
+
+@pytest.fixture()
 def live_server_redis(tmp_path):
     """Same as live_server, but with REDIS_URL set so the rate limiter and
     retrieval cache both run against Redis instead of falling back to
@@ -156,6 +187,37 @@ def live_server_tracing(tmp_path):
     env["AGENTHIVE_RATE_LIMIT_PER_MINUTE"] = "100000"
     env["AGENTHIVE_LOG_JSON"] = "true"
     env["AGENTHIVE_TRACING_CONSOLE"] = "true"
+    proc = subprocess.Popen(
+        [sys.executable, "server.py", "--port", str(port), "--db", db_path,
+         "--host", "127.0.0.1"],
+        cwd=ROOT, env=env,
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+    )
+    base_url = f"http://127.0.0.1:{port}"
+    try:
+        _wait_for(base_url + "/healthz")
+        yield base_url, proc
+    finally:
+        proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+
+
+@pytest.fixture()
+def live_server_tracing_sampled_out(tmp_path):
+    """Same as live_server_tracing, but AGENTHIVE_TRACE_SAMPLE_RATIO=0 - no
+    trace should ever be sampled in, so no span should ever print. Proves
+    the sampling knob actually suppresses export, not just that it's read
+    without error (see tests/test_tracing.py)."""
+    port = _free_port()
+    db_path = str(tmp_path / "test.db")
+    env = dict(os.environ)
+    env["AGENTHIVE_RATE_LIMIT_PER_MINUTE"] = "100000"
+    env["AGENTHIVE_LOG_JSON"] = "true"
+    env["AGENTHIVE_TRACING_CONSOLE"] = "true"
+    env["AGENTHIVE_TRACE_SAMPLE_RATIO"] = "0"
     proc = subprocess.Popen(
         [sys.executable, "server.py", "--port", str(port), "--db", db_path,
          "--host", "127.0.0.1"],

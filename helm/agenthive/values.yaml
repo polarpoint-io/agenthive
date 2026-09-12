@@ -115,6 +115,14 @@ rateLimit:
   perMinute: 120
   windowSeconds: 60
 
+# --- auth ---
+auth:
+  # 0 (default) - tokens never expire on their own, the original behavior.
+  # Set to expire new/rotated tokens automatically after this many
+  # seconds; only applies going forward, existing tokens are unaffected
+  # until next rotated. See DEPLOYMENT.md / ADR.md "v4".
+  tokenTtlSeconds: 0
+
 cache:
   enabled: true
   ttlSeconds: 300
@@ -144,6 +152,11 @@ tracing:
   # a zero-infrastructure way to confirm tracing is wired up (`kubectl
   # logs`) before pointing otlpEndpoint at a real backend.
   console: false
+  # Head-based sampling ratio, 0.0-1.0. 1.0 (default) traces every
+  # request - fine at low/moderate traffic; turn down for a
+  # high-throughput deployment rather than paying for and storing a
+  # trace per request. See ADR.md "v4" and DEPLOYMENT.md.
+  sampleRatio: 1.0
 
 # Extra environment variables / envFrom, passed straight through - use
 # this for anything not already modeled above.

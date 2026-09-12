@@ -28,3 +28,9 @@ data:
   {{- if .Values.tracing.console }}
   AGENTHIVE_TRACING_CONSOLE: "true"
   {{- end }}
+  {{- if ne (.Values.tracing.sampleRatio | float64) 1.0 }}
+  AGENTHIVE_TRACE_SAMPLE_RATIO: {{ .Values.tracing.sampleRatio | quote }}
+  {{- end }}
+  {{- if .Values.auth.tokenTtlSeconds }}
+  AGENTHIVE_TOKEN_TTL_SECONDS: {{ .Values.auth.tokenTtlSeconds | quote }}
+  {{- end }}

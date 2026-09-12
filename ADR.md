@@ -1,13 +1,14 @@
 # ADR: AgentHive
 
-Status: v3, in use. Originally written 2026-09-12 to lay out a "shared
+Status: v4, in use. Originally written 2026-09-12 to lay out a "shared
 memory across agents" design that avoids three tradeoffs common to
 proxy-based agent memory systems: no LLM-intercepting proxy, no per-request
 token tax, and a hard approval gate before anything becomes shared memory.
 See "v1 - resolving the open questions" for what
 changed from v0, "v2 - containerized for real, metrics, and closing the
-remaining gaps" for what changed next, and "v3 - the entire journey,
-mapped" at the bottom for what changed since.
+remaining gaps" for what changed next, "v3 - the entire journey,
+mapped" for what changed after that, and "v4 - token expiry and trace
+sampling" at the bottom for the most recent round.
 
 ## What this is for
 
@@ -288,3 +289,45 @@ all a documented, ordered process instead of README archaeology.
 Open questions carried forward: everything from v1/v2's lists, plus no
 trace sampling policy (every request is traced when tracing is enabled -
 fine at today's traffic, worth revisiting before very high throughput).
+
+## v4 - token expiry and trace sampling
+
+Closes two of the four gaps this ADR had been carrying forward since v1
+and v3. The other two - the L1→L2→L3 promotion worker and the
+LLM-request proxy - are still open on purpose, not by oversight; see
+below for why closing them isn't a matter of just writing the code.
+
+- **Token expiry (`AGENTHIVE_TOKEN_TTL_SECONDS`, `db.py`).** 0 (default)
+  keeps the original behavior - tokens are valid until an admin rotates
+  or revokes them. Set it, and every token minted or rotated from then on
+  carries a `token_expires_at`; `user_by_token` rejects an expired token
+  exactly like a revoked one (same 401, no distinguishing message - see
+  its docstring for why: not leaking "this token existed but expired"
+  versus "this token never existed" to whoever is holding it). Only
+  applies going forward - an existing token already in the database keeps
+  working until it's next rotated, so turning this on doesn't
+  retroactively lock out a whole team. `token_expires_at` migrates onto
+  both backends' `users` table additively (`ALTER TABLE ... ADD COLUMN`,
+  guarded for SQLite's lack of `IF NOT EXISTS` there) rather than
+  requiring a fresh database, consistent with "the schema translates
+  directly" from the original ADR.
+- **Trace sampling (`AGENTHIVE_TRACE_SAMPLE_RATIO`, `tracing.py`).** 1.0
+  (default) traces every request, unchanged from v3. Set below 1.0 and
+  `ParentBased(TraceIdRatioBased(ratio))` makes the sampling decision once
+  at the root span; every child span inherits it, so a sampled-in trace
+  is never left with only some of its spans exported. Head-based, not
+  tail-based - the decision is made before the request runs, so it can't
+  react to "actually this one was slow, keep it" the way a tail sampler
+  could. Fine for the stated goal (control cost/volume at high
+  throughput, not surface anomalies) - a team that needs the latter
+  should put a tail-sampling collector (Jaeger, an OTel Collector) in
+  front of the OTLP endpoint rather than rebuilding that logic here.
+- **Why the other two stay open.** The L1→L2→L3 promotion worker needs an
+  LLM-driven summarization policy designed against real usage data this
+  service doesn't have yet - building it now means guessing at what a
+  good summary looks like, the same "premature" judgment from v1,
+  unchanged by anything in this round. The LLM-request proxy is not a
+  missing feature at all; building it would reverse the central decision
+  this whole document argues for (see "Why not build an LLM-request
+  proxy" above) - closing it as a checklist item would mean undoing the
+  reason AgentHive is shaped the way it is, not finishing it.

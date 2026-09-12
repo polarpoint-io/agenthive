@@ -197,18 +197,18 @@ most for a production deploy:
 | `AGENTHIVE_METRICS_ENABLED` | Set to `false` to disable `/metrics` |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | Sends traces to an OTLP/HTTP backend (Jaeger, Tempo, ...); unset means no tracing |
 | `AGENTHIVE_TRACING_CONSOLE` | `true` prints each finished span as JSON to stdout - no backend needed |
+| `AGENTHIVE_TRACE_SAMPLE_RATIO` | Head-based sampling ratio, `0.0`-`1.0` (default `1.0` - trace everything) |
+| `AGENTHIVE_TOKEN_TTL_SECONDS` | Tokens minted/rotated after this is set expire after this many seconds (default `0` - never) |
 | `AGENTHIVE_LOG_JSON` | `true` for JSON lines (recommended behind a log aggregator) |
 
 ## Known limitations
 
-Both gaps flagged in the original v1 write-up are closed as of v2 (see
-ADR.md's "v2" section for the reasoning): TLS is available natively, and
-rate limiting/caching are shared across replicas when `REDIS_URL` is
-set. What's still true:
+Gaps flagged in earlier versions and since closed (see ADR.md for the
+reasoning behind each): TLS natively, and rate limiting/caching shared
+across replicas when `REDIS_URL` is set (v2); token expiry via
+`AGENTHIVE_TOKEN_TTL_SECONDS` and head-based trace sampling via
+`AGENTHIVE_TRACE_SAMPLE_RATIO` (v4). What's still true:
 
-- **No key/token expiry policy.** Tokens are valid until explicitly
-  rotated or revoked. Build expiry into your own process (e.g. rotate
-  tokens on a schedule) if your compliance requirements need it.
 - **The Redis-backed rate limiter is a fixed window, not a true sliding
   window** (one `INCR` + one `EXPIRE` per call, see `auth.py`) - up to a
   2x burst is possible right at a window boundary. An accepted
@@ -219,8 +219,9 @@ set. What's still true:
   the network layer (NetworkPolicy, security group) rather than relying
   on obscurity - it carries no per-team or per-user data regardless
   (see `observability/README.md`).
-- **No trace sampling policy.** When tracing is enabled, every request
-  is traced - fine at the traffic this service sees today; a very
-  high-throughput deployment should add head-based sampling (a wrapper
-  around `tracing.start_server_span`) before turning this on, rather
-  than relying on it being free at any volume.
+- **Trace sampling is head-based, not tail-based.** The decision is made
+  before the request runs, so a sampler set below `1.0` can't react to
+  "actually this one was slow, keep it" - it can only control volume/cost
+  at a fixed rate. A team that needs tail-based sampling should put a
+  collector capable of it (an OTel Collector, Jaeger's own) in front of
+  the OTLP endpoint rather than expecting this ratio to do that job.

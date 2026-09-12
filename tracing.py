@@ -186,9 +186,17 @@ def init_tracing() -> str:
         ConsoleSpanExporter,
         SimpleSpanProcessor,
     )
+    from opentelemetry.sdk.trace.sampling import ParentBased, TraceIdRatioBased
 
+    # Head-based: the decision is made once, at the root span, and every
+    # child span in the trace inherits it via ParentBased - so a sampled-in
+    # request is never left with only some of its spans exported. At the
+    # default ratio of 1.0 this is equivalent to AlwaysOn (today's
+    # behavior); see config.py's trace_sample_ratio and ADR.md.
+    ratio = min(max(CONFIG.trace_sample_ratio, 0.0), 1.0)
     provider = TracerProvider(
-        resource=Resource.create({"service.name": CONFIG.otel_service_name})
+        resource=Resource.create({"service.name": CONFIG.otel_service_name}),
+        sampler=ParentBased(TraceIdRatioBased(ratio)),
     )
     modes = []
 
@@ -217,6 +225,8 @@ def init_tracing() -> str:
 
     _otel_trace.set_tracer_provider(provider)
     _MODE = "+".join(modes)
+    if ratio < 1.0:
+        _MODE += f" (sampled {ratio:.0%})"
     return _MODE
 
 

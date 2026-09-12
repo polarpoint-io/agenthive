@@ -98,6 +98,20 @@ and `../../observability/README.md` for what gets instrumented (the
 rate-limit check, auth lookup, cache lookup, graph traversal, and the
 approval gate itself) and why it's a trace per call, not a proxy.
 
+`tracing.sampleRatio` (default `1.0` - trace everything) is a head-based
+sampling knob for a high-throughput deployment: turn it down instead of
+paying for and storing a trace per request. See `../../ADR.md`'s "v4"
+section and `../../DEPLOYMENT.md`'s "Known limitations" for why it's
+head-based, not tail-based.
+
+## Token expiry
+
+`auth.tokenTtlSeconds` (default `0` - never expires, the original
+behavior). Set it and every token minted or rotated from then on expires
+automatically; an expired token fails auth exactly like a revoked one.
+Existing tokens keep working until next rotated - this doesn't
+retroactively lock a team out. See `../../ADR.md`'s "v4" section.
+
 ## What's deliberately NOT in this chart
 
 - **No bundled Postgres or Redis.** Point `database.postgres.url` /

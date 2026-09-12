@@ -356,8 +356,8 @@ class Handler(BaseHTTPRequestHandler):
         target = STORE.get_user(params["user_id"])
         if not target or target["team_id"] != params["team_id"]:
             raise ValueError("user not found for this team")
-        token = STORE.rotate_user_token(params["user_id"])
-        self._send(200, {"id": params["user_id"], "token": token})
+        token, expires_at = STORE.rotate_user_token(params["user_id"])
+        self._send(200, {"id": params["user_id"], "token": token, "token_expires_at": expires_at})
         return 200
 
     def h_revoke_user(self, params, query, user):

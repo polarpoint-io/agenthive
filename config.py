@@ -25,6 +25,16 @@ def _int(name: str, default: int) -> int:
         return default
 
 
+def _float(name: str, default: float) -> float:
+    val = os.environ.get(name)
+    if val is None or val == "":
+        return default
+    try:
+        return float(val)
+    except ValueError:
+        return default
+
+
 class Config:
     # --- storage ---
     # If DATABASE_URL is set and starts with postgres:// or postgresql://,
@@ -41,6 +51,16 @@ class Config:
     # Minimum length enforced on generated tokens; not user-configurable,
     # listed here for visibility.
     token_prefix: str = "ah-"
+
+    # 0 (default) means tokens never expire on their own - the original
+    # behavior, and still correct for a small team that rotates tokens by
+    # hand. Set to expire new/rotated tokens automatically after this many
+    # seconds; an expired token fails auth exactly like a revoked one (see
+    # db.py's user_by_token), so an admin has to rotate it to keep going.
+    # Only applies to tokens created/rotated after this is set - existing
+    # tokens are unaffected until they're next rotated. See DEPLOYMENT.md
+    # "Known limitations".
+    token_ttl_seconds: int = _int("AGENTHIVE_TOKEN_TTL_SECONDS", 0)
 
     # --- rate limiting ---
     # A sliding-window limiter, per API key (falls back to per-IP for the
@@ -101,6 +121,16 @@ class Config:
     otel_exporter_otlp_endpoint: str = os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT", "")
     otel_service_name: str = os.environ.get("OTEL_SERVICE_NAME", "agenthive")
     tracing_console: bool = _bool("AGENTHIVE_TRACING_CONSOLE", False)
+
+    # Head-based sampling ratio in [0.0, 1.0]. 1.0 (default) traces every
+    # request - fine at the traffic this service sees today (see ADR.md
+    # "Open questions"), but a high-throughput deployment should turn this
+    # down rather than pay for and store a trace per request. The decision
+    # is made once per trace, at the root span, via OpenTelemetry's
+    # standard ParentBased(TraceIdRatioBased(...)) sampler - see
+    # tracing.py - so a sampled-in trace stays fully sampled end to end
+    # instead of dropping spans partway through.
+    trace_sample_ratio: float = _float("AGENTHIVE_TRACE_SAMPLE_RATIO", 1.0)
 
     @classmethod
     def from_env(cls) -> "Config":
