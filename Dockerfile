@@ -3,14 +3,16 @@ FROM python:3.11-slim
 WORKDIR /app
 
 # prometheus_client is a hard dependency (metrics.py always imports it);
-# psycopg2-binary, redis, and the opentelemetry packages are optional at
-# runtime (only used if DATABASE_URL / REDIS_URL / OTEL_EXPORTER_OTLP_ENDPOINT
-# or AGENTHIVE_TRACING_CONSOLE are set) but installing them here means all
-# of them are ready to use without rebuilding the image.
+# psycopg2-binary, redis, the opentelemetry packages, and PyJWT[crypto] are
+# optional at runtime (only used if DATABASE_URL / REDIS_URL /
+# OTEL_EXPORTER_OTLP_ENDPOINT / AGENTHIVE_TRACING_CONSOLE / AGENTHIVE_AZURE_*
+# are set) but installing them here means all of them are ready to use
+# without rebuilding the image.
 COPY requirements.txt .
 RUN pip install --no-cache-dir \
     prometheus_client psycopg2-binary redis \
-    opentelemetry-api opentelemetry-sdk opentelemetry-exporter-otlp-proto-http
+    opentelemetry-api opentelemetry-sdk opentelemetry-exporter-otlp-proto-http \
+    "PyJWT[crypto]"
 
 COPY . .
 

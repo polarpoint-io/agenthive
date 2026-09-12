@@ -100,9 +100,9 @@ approval gate itself) and why it's a trace per call, not a proxy.
 
 `tracing.sampleRatio` (default `1.0` - trace everything) is a head-based
 sampling knob for a high-throughput deployment: turn it down instead of
-paying for and storing a trace per request. See `../../ADR.md`'s "v4"
-section and `../../DEPLOYMENT.md`'s "Known limitations" for why it's
-head-based, not tail-based.
+paying for and storing a trace per request. See `../../ADR.md`'s
+"Reliability and observability" section and `../../DEPLOYMENT.md`'s
+"Known limitations" for why it's head-based, not tail-based.
 
 ## Token expiry
 
@@ -110,7 +110,39 @@ head-based, not tail-based.
 behavior). Set it and every token minted or rotated from then on expires
 automatically; an expired token fails auth exactly like a revoked one.
 Existing tokens keep working until next rotated - this doesn't
-retroactively lock a team out. See `../../ADR.md`'s "v4" section.
+retroactively lock a team out. See `../../ADR.md`'s "Authentication" section.
+
+## Azure AD sign-in (humans only)
+
+Off by default. Agents keep using their personal tokens either way - this
+only adds an optional Microsoft sign-in button to the review UI:
+
+```bash
+helm upgrade agenthive helm/agenthive --reuse-values \
+  --set auth.azureAd.enabled=true \
+  --set auth.azureAd.tenantId=... \
+  --set auth.azureAd.clientId=... \
+  --set auth.azureAd.existingSecret=agenthive-azure-ad \
+  --set auth.azureAd.redirectUri=https://agenthive.yourcompany.com/auth/azure/callback
+```
+
+Create the secret first (same reasoning as the database/redis secrets
+above - don't pass a real client secret via `--set`):
+
+```bash
+kubectl create secret generic agenthive-azure-ad \
+  --from-literal=client-secret='...'
+```
+
+Or set `auth.azureAd.clientSecret` directly and let the chart create the
+Secret for you (fine for a quick test, not for a real deployment - same
+tradeoff as `database.postgres.url`/`redis.url` above). `redirectUri`
+must exactly match a Redirect URI registered on the Azure AD App
+Registration. Signing in with Microsoft never auto-creates an AgentHive
+user - an admin links an existing one to an Azure AD object id from the
+Users card, or `POST /teams/{id}/users/{id}/link-azure`. See
+`../../ADR.md`'s "Authentication" section and `../../README.md`'s "Azure
+AD sign-in" section.
 
 ## What's deliberately NOT in this chart
 

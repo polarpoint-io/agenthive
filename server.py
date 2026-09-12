@@ -12,11 +12,26 @@ Unauthenticated:
   GET  /metrics                                         Prometheus exposition format
   GET  /ui                                              the review UI (static page)
 
-Authenticated with  X-API-Key: <personal user token>  (see auth.py):
+  GET  /auth/azure/status                               {enabled} - whether Azure AD
+                                                          login is configured (see config.py)
+  GET  /auth/azure/login                                302 -> Microsoft's authorize page
+                                                          (humans only - see ADR.md
+                                                          "Authentication")
+  GET  /auth/azure/callback                             Azure AD redirects here with
+                                                          ?code&state; 302 -> /ui#... with
+                                                          either a minted session or a
+                                                          "not linked yet" message
+
+Authenticated with  X-API-Key: <personal user token, OR a session token minted
+by a successful Azure AD sign-in - see oidc.py>  (see auth.py):
   POST /teams/{team_id}/users                [admin]    {name, role} -> token shown once
   GET  /teams/{team_id}/users                [admin]
   POST /teams/{team_id}/users/{id}/rotate    [admin or self]
   POST /teams/{team_id}/users/{id}/revoke    [admin]
+  POST /teams/{team_id}/users/{id}/link-azure    [admin]  {azure_oid} - links this user to
+                                                            an Azure AD object id; no
+                                                            auto-provisioning (see ADR.md)
+  POST /teams/{team_id}/users/{id}/unlink-azure  [admin]
 
   POST /teams/{team_id}/agents               [member]
   GET  /teams/{team_id}/agents               [member]
@@ -62,9 +77,10 @@ import sys
 import time
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import urlparse, parse_qs
+from urllib.parse import urlparse, parse_qs, quote as urlquote
 
 import metrics
+import oidc
 import tracing
 from auth import RATE_LIMITER, AuthError, require_role
 from cache import CACHE
@@ -115,10 +131,16 @@ ROUTES = [
     (re.compile(r"^/metrics$"), "GET", "metrics", None),
     (re.compile(r"^/ui/?$"), "GET", "ui", None),
 
+    (re.compile(r"^/auth/azure/status$"), "GET", "azure_status", None),
+    (re.compile(r"^/auth/azure/login$"), "GET", "azure_login", None),
+    (re.compile(r"^/auth/azure/callback$"), "GET", "azure_callback", None),
+
     (re.compile(r"^/teams/(?P<team_id>[\w-]+)/users$"), "POST", "create_user", "admin"),
     (re.compile(r"^/teams/(?P<team_id>[\w-]+)/users$"), "GET", "list_users", "admin"),
     (re.compile(r"^/teams/(?P<team_id>[\w-]+)/users/(?P<user_id>[\w-]+)/rotate$"), "POST", "rotate_user", "self_or_admin"),
     (re.compile(r"^/teams/(?P<team_id>[\w-]+)/users/(?P<user_id>[\w-]+)/revoke$"), "POST", "revoke_user", "admin"),
+    (re.compile(r"^/teams/(?P<team_id>[\w-]+)/users/(?P<user_id>[\w-]+)/link-azure$"), "POST", "link_azure", "admin"),
+    (re.compile(r"^/teams/(?P<team_id>[\w-]+)/users/(?P<user_id>[\w-]+)/unlink-azure$"), "POST", "unlink_azure", "admin"),
 
     (re.compile(r"^/teams/(?P<team_id>[\w-]+)/agents$"), "POST", "create_agent", "member"),
     (re.compile(r"^/teams/(?P<team_id>[\w-]+)/agents$"), "GET", "list_agents", "member"),
@@ -171,6 +193,12 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _send_redirect(self, location: str):
+        self.send_response(302)
+        self.send_header("Location", location)
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
     def _body(self) -> dict:
         length = int(self.headers.get("Content-Length", 0))
         if not length:
@@ -185,13 +213,19 @@ class Handler(BaseHTTPRequestHandler):
         return "ip:" + self.client_address[0]
 
     def _authenticate(self):
-        """Returns the active user dict for X-API-Key, or raises AuthError."""
+        """Returns the active user dict for X-API-Key, or raises AuthError.
+        Accepts either a personal token (agents and humans, never expires
+        unless AGENTHIVE_TOKEN_TTL_SECONDS is set) or a session token
+        minted by a successful Azure AD sign-in (humans only, always
+        short-lived - see oidc.py / db.py's session_by_token). Both live
+        in the same header; trying the personal-token table first costs
+        nothing extra since the common case (agents) always hits it."""
         api_key = self.headers.get("X-API-Key", "")
         if not api_key:
             raise AuthError(401, "missing X-API-Key header")
-        user = STORE.user_by_token(api_key)
+        user = STORE.user_by_token(api_key) or STORE.session_by_token(api_key)
         if not user:
-            raise AuthError(401, "invalid or revoked API key")
+            raise AuthError(401, "invalid, expired, or revoked API key")
         return user
 
     def _dispatch(self, method: str):
@@ -337,6 +371,81 @@ class Handler(BaseHTTPRequestHandler):
         self._send_html(200, UI_HTML)
         return 200
 
+    # ---- Azure AD (humans only - see ADR.md "Authentication", oidc.py) ----
+
+    def h_azure_status(self, params, query):
+        self._send(200, {"enabled": CONFIG.oidc_enabled})
+        return 200
+
+    def h_azure_login(self, params, query):
+        if not CONFIG.oidc_enabled:
+            self._send(404, {"error": "Azure AD login is not configured"})
+            return 404
+        with tracing.TRACER.start_as_current_span("oidc.login"):
+            state = oidc.new_state()
+            verifier, challenge = oidc.new_pkce_pair()
+            STORE.create_oidc_state(state, verifier)
+            url = oidc.build_authorize_url(state, challenge)
+        self._send_redirect(url)
+        return 302
+
+    def h_azure_callback(self, params, query):
+        if not CONFIG.oidc_enabled:
+            self._send(404, {"error": "Azure AD login is not configured"})
+            return 404
+
+        error = (query.get("error_description") or query.get("error") or [None])[0]
+        if error:
+            self._send_redirect("/ui#azure_error=" + urlquote(error))
+            return 302
+
+        state = (query.get("state") or [None])[0]
+        code = (query.get("code") or [None])[0]
+        if not state or not code:
+            self._send_redirect("/ui#azure_error=" + urlquote("missing code/state"))
+            return 302
+
+        with tracing.TRACER.start_as_current_span("oidc.callback") as span:
+            verifier = STORE.consume_oidc_state(state)
+            if not verifier:
+                self._send_redirect(
+                    "/ui#azure_error=" + urlquote("sign-in expired, please try again")
+                )
+                return 302
+
+            try:
+                claims = oidc.exchange_code_for_claims(code, verifier)
+            except oidc.OidcError as e:
+                span.record_exception(e)
+                self._send_redirect("/ui#azure_error=" + urlquote(str(e)))
+                return 302
+
+            azure_oid = claims["oid"]
+            name = claims.get("name") or claims.get("preferred_username") or "Microsoft account"
+            email = claims.get("email") or claims.get("preferred_username") or ""
+            span.set_attribute("agenthive.azure_oid", azure_oid)
+
+            user = STORE.user_by_azure_oid(azure_oid)
+            if not user:
+                span.set_attribute("agenthive.azure_link_needed", True)
+                self._send_redirect(
+                    "/ui#azure_link_needed=1"
+                    "&oid=" + urlquote(azure_oid) +
+                    "&email=" + urlquote(email) +
+                    "&name=" + urlquote(name)
+                )
+                return 302
+
+            token, expires_at = STORE.create_session(user["id"])
+            span.set_attribute("agenthive.user_id", user["id"])
+
+        self._send_redirect(
+            "/ui#session=" + urlquote(token) +
+            "&team=" + urlquote(user["team_id"]) +
+            "&name=" + urlquote(user["name"])
+        )
+        return 302
+
     # ---- users ----
 
     def h_create_user(self, params, query, user):
@@ -366,6 +475,20 @@ class Handler(BaseHTTPRequestHandler):
             raise ValueError("user not found for this team")
         STORE.revoke_user(params["user_id"])
         self._send(200, {"id": params["user_id"], "revoked": True})
+        return 200
+
+    def h_link_azure(self, params, query, user):
+        body = self._body()
+        azure_oid = body.get("azure_oid")
+        if not azure_oid:
+            raise ValueError("azure_oid is required")
+        STORE.link_azure_user(params["team_id"], params["user_id"], azure_oid)
+        self._send(200, {"id": params["user_id"], "azure_oid": azure_oid})
+        return 200
+
+    def h_unlink_azure(self, params, query, user):
+        STORE.unlink_azure_user(params["team_id"], params["user_id"])
+        self._send(200, {"id": params["user_id"], "azure_oid": None})
         return 200
 
     # ---- agents / tasks ----

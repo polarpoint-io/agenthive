@@ -23,5 +23,11 @@ opentelemetry-api>=1.24,<2
 opentelemetry-sdk>=1.24,<2
 opentelemetry-exporter-otlp-proto-http>=1.24,<2
 
+# Azure AD (Microsoft Entra ID) login for the review UI, humans only (only
+# imported if AGENTHIVE_AZURE_TENANT_ID/CLIENT_ID/CLIENT_SECRET/REDIRECT_URI
+# are all set - see config.py/oidc.py). [crypto] pulls in cryptography for
+# RS256 id_token signature verification against Azure AD's published JWKS.
+PyJWT[crypto]>=2.8,<3
+
 # Test suite.
 pytest>=7.4,<9

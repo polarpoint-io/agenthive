@@ -93,6 +93,8 @@ jobs:
           expect_failure "--set autoscaling.enabled=true"
           expect_failure "--set tls.enabled=true"
           expect_failure "--set ingress.enabled=true --set ingress.tls.enabled=true"
+          expect_failure "--set auth.azureAd.enabled=true"
+          expect_failure "--set auth.azureAd.enabled=true --set auth.azureAd.tenantId=t --set auth.azureAd.clientId=c --set auth.azureAd.redirectUri=https://x/auth/azure/callback"
 
       - name: Render scenario files together, not just one at a time
         run: |
@@ -101,6 +103,7 @@ jobs:
             -f "$CHART/values-postgres-example.yaml" \
             -f "$CHART/ci/native-tls-values.yaml" \
             -f "$CHART/ci/tracing-values.yaml" \
+            -f "$CHART/ci/azure-ad-values.yaml" \
             | kubeconform -strict -summary -ignore-missing-schemas -kubernetes-version 1.31.0 -
 
       # No "every top-level value must appear in a README table" check here

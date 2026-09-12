@@ -72,6 +72,10 @@
       <button onclick="connect()">Connect</button>
       <button class="secondary" onclick="disconnect()">Forget</button>
     </div>
+    <div id="azureRow" class="row" style="display:none;margin-top:10px">
+      <button class="secondary" onclick="signInWithAzure()">Sign in with Microsoft</button>
+      <span class="sub">Only works for a user an admin has already linked to your Azure AD account - see the Users card.</span>
+    </div>
     <div id="whoami" class="sub" style="margin-top:10px"></div>
   </div>
 
@@ -261,12 +265,18 @@ async function loadUsers(){
     const box = document.getElementById('usersList');
     if (!users.length){ box.className='empty'; box.textContent='No users yet.'; return; }
     box.className = '';
-    box.innerHTML = '<table><tr><th>Name</th><th>Role</th><th>Status</th><th></th></tr>' + users.map(u => `
+    box.innerHTML = '<table><tr><th>Name</th><th>Role</th><th>Status</th><th>Azure AD</th><th></th></tr>' + users.map(u => `
       <tr>
         <td>${escapeHtml(u.name)}</td>
         <td><span class="pill ${u.role === 'admin' ? 'admin' : ''}">${u.role}</span></td>
         <td>${u.revoked_at ? 'revoked' : 'active'}</td>
-        <td>${u.revoked_at ? '' : `<button class="secondary" onclick="revokeUser('${u.id}')">Revoke</button>`}</td>
+        <td>${u.azure_oid ? '<span class="pill">linked</span>' : '<span class="sub">not linked</span>'}</td>
+        <td>
+          ${u.revoked_at ? '' : `<button class="secondary" onclick="revokeUser('${u.id}')">Revoke</button>`}
+          ${u.azure_oid
+            ? `<button class="secondary" onclick="unlinkAzure('${u.id}')">Unlink Azure</button>`
+            : `<button class="secondary" onclick="linkAzure('${u.id}')">Link Azure</button>`}
+        </td>
       </tr>`).join('') + '</table>';
   } catch(e){ /* non-admin users can't see this; ignore */ }
 }
@@ -284,8 +294,20 @@ async function createUser(){
   } catch(e){ showStatus(e.message, 'err'); }
 }
 async function revokeUser(id){
-  if (!confirm('Revoke this user\\'s access?')) return;
+  if (!confirm('Revoke this user\'s access?')) return;
   try { await api('/teams/' + conn.teamId + '/users/' + id + '/revoke', {method:'POST', body:'{}'}); await loadUsers(); showStatus('Revoked.', 'ok'); }
+  catch(e){ showStatus(e.message, 'err'); }
+}
+
+async function linkAzure(id){
+  const azure_oid = prompt('Azure AD object id (oid) to link - the person signs in with Microsoft once to see their own oid if they don\'t have it yet:');
+  if (!azure_oid) return;
+  try { await api('/teams/' + conn.teamId + '/users/' + id + '/link-azure', {method:'POST', body: JSON.stringify({azure_oid})}); await loadUsers(); showStatus('Linked.', 'ok'); }
+  catch(e){ showStatus(e.message, 'err'); }
+}
+async function unlinkAzure(id){
+  if (!confirm('Unlink this user from Azure AD? They can still sign in with their personal token.')) return;
+  try { await api('/teams/' + conn.teamId + '/users/' + id + '/unlink-azure', {method:'POST', body:'{}'}); await loadUsers(); showStatus('Unlinked.', 'ok'); }
   catch(e){ showStatus(e.message, 'err'); }
 }
 
@@ -334,7 +356,62 @@ function escapeHtml(s){
   return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
 
+// Azure AD sign-in (humans only - see ADR.md "Authentication"). The
+// review UI is always served by the same process that owns the Azure AD
+// config (tenant/client id/secret), so window.location.origin - not the
+// "Base URL" field above, which exists for pointing this page at a
+// *different* API host - is always the right target for these calls.
+async function checkAzureStatus(){
+  try {
+    const res = await fetch(window.location.origin + '/auth/azure/status');
+    const data = await res.json();
+    document.getElementById('azureRow').style.display = data.enabled ? 'flex' : 'none';
+  } catch(e){ /* leave the button hidden */ }
+}
+function signInWithAzure(){
+  window.location.href = window.location.origin + '/auth/azure/login';
+}
+
+// After a redirect back from /auth/azure/callback, everything needed is in
+// the URL fragment (never sent to the server in a Referer/log line):
+//   #session=<token>&team=<id>&name=<name>          - signed in, ready to go
+//   #azure_link_needed=1&oid=<oid>&email=..&name=.. - no AgentHive user linked yet
+//   #azure_error=<message>                          - sign-in failed
+function handleAzureRedirect(){
+  if (!location.hash) return false;
+  const params = new URLSearchParams(location.hash.slice(1));
+  history.replaceState(null, '', location.pathname + location.search); // don't leave the token in the URL bar
+
+  if (params.has('session')){
+    conn = {
+      baseUrl: window.location.origin,
+      teamId: params.get('team') || '',
+      apiKey: params.get('session'),
+    };
+    saveConn(conn);
+    refreshAll().then(() => showStatus('Signed in as ' + (params.get('name') || 'you') + ' via Microsoft.', 'ok'));
+    return true;
+  }
+  if (params.get('azure_link_needed') === '1'){
+    const oid = params.get('oid') || '';
+    showStatus(
+      'Signed in as ' + (params.get('name') || 'you') +
+      (params.get('email') ? ' (' + params.get('email') + ')' : '') +
+      ' via Microsoft, but no AgentHive user is linked to that account yet. ' +
+      'Ask an admin to link Azure object id: ' + oid, 'err'
+    );
+    return true;
+  }
+  if (params.has('azure_error')){
+    showStatus('Microsoft sign-in failed: ' + params.get('azure_error'), 'err');
+    return true;
+  }
+  return false;
+}
+
 (function init(){
+  checkAzureStatus();
+  if (handleAzureRedirect()) return;
   const saved = loadConn();
   if (saved){ conn = saved; refreshAll().catch(()=>{}); }
 })();

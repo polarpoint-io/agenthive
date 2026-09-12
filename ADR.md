@@ -1,14 +1,11 @@
 # ADR: AgentHive
 
-Status: v4, in use. Originally written 2026-09-12 to lay out a "shared
-memory across agents" design that avoids three tradeoffs common to
-proxy-based agent memory systems: no LLM-intercepting proxy, no per-request
-token tax, and a hard approval gate before anything becomes shared memory.
-See "v1 - resolving the open questions" for what
-changed from v0, "v2 - containerized for real, metrics, and closing the
-remaining gaps" for what changed next, "v3 - the entire journey,
-mapped" for what changed after that, and "v4 - token expiry and trace
-sampling" at the bottom for the most recent round.
+Status: in use.
+
+A "shared memory across agents" design that avoids three tradeoffs common
+to proxy-based agent memory systems: no LLM-intercepting proxy, no
+per-request token tax, and a hard approval gate before anything becomes
+shared memory.
 
 ## What this is for
 
@@ -59,9 +56,8 @@ that shape and decided not to build it, for three reasons:
 
 - **Team** — owns everything. Memory never crosses a team boundary; this
   is enforced at the query layer, not by convention.
-- **User** — a person with a personal token and a role (`admin` or
-  `member`), scoped to one team. Replaces v0's single shared team API key
-  (see "v1" below).
+- **User** — a person or agent with a personal token and a role (`admin`
+  or `member`), scoped to one team.
 - **Agent** — a role under a team (name, description, system prompt).
   Memory can optionally be filtered/attributed by agent, but any user
   under a team can retrieve any approved memory under that team by
@@ -105,85 +101,109 @@ BFS outward from an anchor node's resolved links, stopping traversal
 `hub_cutoff`, restricted to `status=approved` and the given `team_id`.
 Returns the neighborhood plus an approximate token count.
 
-## Auth (v1)
+## Authentication
 
-Per-user personal tokens (`X-API-Key` header), hashed at rest (SHA-256,
-since tokens are high-entropy random values from `secrets`, not
-low-entropy passwords, so a fast hash is the right tradeoff here). Every
-user has a role: `admin` (review pending memory, manage users, configure
-auto-approve rules) or `member` (log/retrieve memory, manage
-agents/tasks). Tokens can be rotated (old one stops working immediately)
-or revoked. See `auth.py` and `tests/test_auth.py`.
+Two independent login paths, because agents and humans have different
+needs here:
 
-## v1 — resolving the open questions
+**Personal API tokens (agents and humans alike).** A per-user token
+(`X-API-Key` header), hashed at rest (SHA-256, since tokens are
+high-entropy random values from `secrets`, not low-entropy passwords, so a
+fast hash is the right tradeoff here). Every user has a role: `admin`
+(review pending memory, manage users, configure auto-approve rules) or
+`member` (log/retrieve memory, manage agents/tasks). Tokens can be rotated
+(old one stops working immediately) or revoked. Optional expiry
+(`AGENTHIVE_TOKEN_TTL_SECONDS`, 0 = never expires, the default): set it and
+every token minted or rotated from then on carries a `token_expires_at`;
+`user_by_token` rejects an expired token exactly like a revoked one (same
+401, no distinguishing message - deliberate, so a stolen token doesn't
+tell whoever holds it "this existed and expired" versus "this never
+existed"). Only applies going forward - an existing token keeps working
+until it's next rotated, so turning this on doesn't retroactively lock out
+a team. See `auth.py`, `db.py`, `tests/test_auth.py`.
 
-The original v0 draft flagged five things as deliberately unsolved. Status
-of each, now:
+**Azure AD (Microsoft Entra ID) sign-in, humans only.** The review UI
+(`GET /ui`) additionally supports signing in with Azure AD via the
+standard OAuth2 Authorization Code flow with PKCE
+(`GET /auth/azure/login` / `GET /auth/azure/callback`, `oidc.py`). This is
+a second login path bolted onto the same user model, not a replacement for
+personal tokens - agents keep using their existing opaque tokens
+unchanged, since Azure AD sign-in is meaningless for a non-interactive
+client. Design choices worth calling out:
 
-- **Per-user auth.** ~~One key per team is a placeholder, not a design.~~
-  Resolved: personal tokens, roles, rotation, revocation. See "Auth (v1)"
-  above.
-- **Auto-approve policy.** ~~Manual approval is the only thing
-  implemented.~~ Resolved: tag- or agent-scoped rules, with an audit
-  trail on every auto-approved node. Still deliberately simple: no regex
-  matching, no size thresholds, no per-rule expiry. Add those if the
-  team's actual usage shows a need for finer-grained rules.
-- **Multi-node / concurrent writers.** ~~SQLite is fine for a single
-  team's single-node deployment.~~ Resolved for the storage layer:
-  `DATABASE_URL` switches to Postgres with no code changes, same schema.
-  Not fully resolved for the process itself: rate limiting is still
-  in-memory per-process (see DEPLOYMENT.md's "Known limitations"), so a
-  multi-replica deployment behind a load balancer has per-replica, not
-  global, rate limits. Fine as a soft guard against a runaway agent; not
-  a hard multi-tenant quota. A shared limiter (Redis) is the next step if
-  that turns out to matter.
-- **L1 -> L2 -> L3 promotion.** Still not built. Deliberately deferred:
-  building an LLM-driven summarization pass against limited real L1
-  volume is still guessing at a policy nobody has needed yet. Revisit
-  once there's enough real usage to know what a good summary policy looks
-  like.
-- **No LLM-request proxy.** Still a deliberate choice, not a missing
-  feature — see "Why not build an LLM-request proxy" above. Unchanged.
+- **Server-side token exchange.** The authorization code exchange and the
+  PKCE `code_verifier` both stay server-side (`db.py`'s `oidc_states`
+  table holds the verifier between the login and callback requests) rather
+  than in browser JavaScript - a more standard confidential-client pattern
+  for a backend service than a public-client SPA flow, and it keeps the
+  client secret out of anything the browser can read.
+- **No auto-provisioning.** A successful Azure sign-in only ever produces
+  a session for an AgentHive user that already exists and has been
+  explicitly linked to that Azure AD object id (`oid` claim - stable per
+  user, unlike `email`) by an admin, via `POST
+  /teams/{id}/users/{id}/link-azure`. Signing in with an Azure account
+  that isn't linked to anything gets a clear "not linked yet, here's your
+  object id, ask an admin" response rather than silently creating an
+  account. This keeps team membership an explicit, auditable admin action
+  regardless of which login path a human used, and avoids reproducing
+  Azure AD's whole tenant membership as an auto-provisioning surface this
+  service would then have to trust.
+- **Sessions, not tokens.** A successful sign-in mints a row in a new
+  `sessions` table - functionally identical to a personal token from
+  `server.py`'s point of view (the same `X-API-Key` header, the same
+  `_authenticate` path) but short-lived on purpose
+  (`AGENTHIVE_AZURE_SESSION_TTL_SECONDS`, default 1 hour) and revoked
+  wholesale by deleting the row rather than living forever like an agent's
+  token. A human re-authenticating against Azure AD periodically is normal
+  and expected; an agent doing so is not, which is the whole reason these
+  are two different mechanisms instead of one.
+- **JWKS-verified, not trust-on-first-use.** The `id_token` Azure AD
+  returns is verified against Microsoft's published signing keys
+  (`https://login.microsoftonline.com/{tenant}/discovery/v2.0/keys`,
+  cached and refreshed on a key-id miss or after 24h) before any claim in
+  it is trusted - issuer, audience, expiry, and the presence of `oid` are
+  all checked before a session is minted.
+- **One new optional dependency.** PyJWT (with its `[crypto]` extra) is
+  lazily imported (`oidc.py`), same pattern as `psycopg2`/`redis` - a
+  deployment that never sets `AGENTHIVE_AZURE_*` never needs it installed.
 
-Also added in v1, not originally called out as an open question but
-necessary for "point this at a real team" use: structured JSON request
-logging, `/healthz` + `/readyz` health endpoints, a rate limiter, and a
-small review UI (`GET /ui`) so approve/reject doesn't require a terminal
-and a Python REPL.
+## Storage
 
-## v2 — containerized for real, metrics, and closing the remaining gaps
+Two backends share one schema: SQLite (default - single file, zero
+dependencies, correct for a single-node deployment) and Postgres (used
+automatically when `DATABASE_URL` is set - needed once multiple replicas
+are writing concurrently). The schema is written to be valid SQL in both
+(`TEXT`-typed columns, app-generated ids, `CREATE TABLE/INDEX IF NOT
+EXISTS`), and every column added after the original schema (`token_expires_at`,
+`azure_oid`, plus the new `oidc_states`/`sessions` tables) migrates on
+additively via `ALTER TABLE ... ADD COLUMN` on every backend startup,
+rather than requiring a fresh database. See `db.py`.
 
-v1's DEPLOYMENT.md flagged two things as known limitations rather than
-solved problems: no built-in TLS, and a rate limiter that couldn't be
-shared across replicas. Both are closed now, and a metrics/caching layer
-was added on top - not because the ADR asked for it, but because a
-service whose whole pitch is "sends fewer tokens, gets reused across the
-team" should be able to show that happening instead of asserting it.
+## Reliability and observability
 
 - **TLS.** `server.py` wraps its socket in an `ssl.SSLContext` when
   `AGENTHIVE_TLS_CERT_FILE`/`AGENTHIVE_TLS_KEY_FILE` are set (see
   `tests/test_tls.py`). Most deployments should still terminate TLS at a
   reverse proxy or the Helm chart's Ingress - native support exists for
   the deployments that have neither in front of them.
-- **Shared rate limiting.** `auth.RedisRateLimiter` replaces the
-  in-memory limiter when `REDIS_URL` is set - a fixed-window counter
-  (`INCR` + `EXPIRE`) shared across every replica pointed at the same
-  Redis, proven with two real server processes in
-  `tests/test_redis_backends.py::test_redis_rate_limit_shared_state`.
-  Redis being unreachable degrades to "allow" rather than failing
-  requests - a rate limiter should never be a new outage cause. Unset
-  `REDIS_URL` and it's exactly v1's in-memory limiter, unchanged.
-- **Retrieval cache.** New: `cache.py` caches `retrieve()`'s result per
+- **Shared rate limiting.** A sliding-window limiter, per API key,
+  in-memory by default (correct for a single node). `auth.RedisRateLimiter`
+  replaces it with a fixed-window counter (`INCR` + `EXPIRE`) shared across
+  every replica when `REDIS_URL` is set, proven with two real server
+  processes in `tests/test_redis_backends.py::test_redis_rate_limit_shared_state`.
+  Redis being unreachable degrades to "allow" rather than failing requests
+  - a rate limiter should never be a new outage cause.
+- **Retrieval cache.** `cache.py` caches `retrieve()`'s result per
   `(team, anchor, hops, hub_cutoff)`, in-memory by default or in Redis
-  when `REDIS_URL` is set (same flag as the rate limiter — one Redis,
-  two uses). A write or review for a team invalidates that team's
-  entries immediately; the TTL (`AGENTHIVE_CACHE_TTL_SECONDS`) is a
-  backstop, not the primary invalidation path. The reason this exists
-  isn't raw performance - it's that a cache hit served to a *different*
-  user than the one who populated it is direct, countable proof the
-  graph is shared memory rather than N private copies. See
+  when `REDIS_URL` is set (same flag as the rate limiter — one Redis, two
+  uses). A write or review for a team invalidates that team's entries
+  immediately; the TTL (`AGENTHIVE_CACHE_TTL_SECONDS`) is a backstop, not
+  the primary invalidation path. The reason this exists isn't raw
+  performance - it's that a cache hit served to a *different* user than
+  the one who populated it is direct, countable proof the graph is shared
+  memory rather than N private copies. See
   `agenthive_cross_user_cache_hits_total` below.
-- **Metrics.** New: `GET /metrics` (Prometheus format, `metrics.py`), no
+- **Metrics.** `GET /metrics` (Prometheus format, `metrics.py`), no
   team_id or user_id labels (unbounded cardinality on a metrics endpoint
   is its own incident waiting to happen). Headline series:
   `agenthive_tokens_avoided_total` (the running sum of full-team tokens
@@ -194,140 +214,71 @@ team" should be able to show that happening instead of asserting it.
   full honesty pass on this), `agenthive_cache_hits_total` /
   `agenthive_cross_user_cache_hits_total` (shared-reuse evidence), and
   DB-backed gauges (`agenthive_memory_nodes`, `agenthive_active_users`,
-  `agenthive_teams`) computed fresh at scrape time via a custom
-  collector rather than kept in sync by hand. Per-team detail (which
-  nodes get reused across the most teammates, this team's retrieval
-  count) lives in `GET /teams/{id}/metrics/summary` instead, backed by a
-  new `memory_access_log` table (`db.py`) - one row per
-  (retrieval, node, user). "How this improves over time" is answered by
-  graphing these in Grafana (`observability/grafana-dashboard.json`),
-  not by a number this service computes for you.
-- **Containerization, for real.** The Dockerfile now installs
-  `prometheus_client` (hard dependency), `psycopg2-binary`, and `redis`
-  (both optional, lazily imported) at build time, and its `HEALTHCHECK`
-  is TLS-aware. `docker-compose.yml` gained `postgres` and `redis`
-  Compose profiles alongside the existing default (SQLite only, single
-  container).
+  `agenthive_teams`) computed fresh at scrape time via a custom collector
+  rather than kept in sync by hand. Per-team detail (which nodes get
+  reused across the most teammates, this team's retrieval count) lives in
+  `GET /teams/{id}/metrics/summary` instead, backed by a
+  `memory_access_log` table (`db.py`) - one row per (retrieval, node,
+  user). "How this improves over time" is answered by graphing these in
+  Grafana (`observability/grafana-dashboard.json`), not by a number this
+  service computes for you.
+- **Distributed tracing (`tracing.py`).** Off by default -
+  `OTEL_EXPORTER_OTLP_ENDPOINT`/`AGENTHIVE_TRACING_CONSOLE` both unset
+  means zero cost, same pattern as `REDIS_URL`/`DATABASE_URL` being unset.
+  Instrumented at the `server.py` handler layer only (not inside
+  `db.py`/`cache.py`/`retrieval.py` internals) so those modules stay free
+  of a cross-cutting concern - the root span per request plus child spans
+  for the rate-limit check, auth lookup, cache lookup, graph traversal,
+  the memory write, and the approval-gate review together already show
+  the whole journey without needing tracing wired through every layer.
+  `client.py` propagates the current span's W3C `traceparent` header on
+  every call; wrapping `retrieve_context`+`log_session` in
+  `client.traced_session(...)` links a whole agent session into one
+  trace. `opentelemetry-api`/`-sdk`/`-exporter-otlp-proto-http` are
+  lazily imported (same pattern as `psycopg2`/`redis`) - a plain `python3
+  server.py` with none of them installed still runs, with `TRACER`
+  becoming a tiny local no-op shim. SIGTERM is converted into the same
+  graceful-shutdown path as Ctrl+C and flushes the OTLP exporter's batch
+  on the way out, so a container being stopped doesn't silently drop
+  whatever hadn't been exported yet.
+- **Trace sampling (`AGENTHIVE_TRACE_SAMPLE_RATIO`, `tracing.py`).** 1.0
+  (default) traces every request. Set below 1.0 and
+  `ParentBased(TraceIdRatioBased(ratio))` makes the sampling decision once
+  at the root span; every child span inherits it, so a sampled-in trace is
+  never left with only some of its spans exported. Head-based, not
+  tail-based - the decision is made before the request runs, so it can't
+  react to "actually this one was slow, keep it" the way a tail sampler
+  could. Fine for the stated goal (control cost/volume at high throughput,
+  not surface anomalies) - a team that needs the latter should put a
+  tail-sampling collector (Jaeger, an OTel Collector) in front of the OTLP
+  endpoint rather than rebuilding that logic here.
+- **Containerization.** The Dockerfile installs `prometheus_client` (hard
+  dependency), plus `psycopg2-binary`, `redis`, the OpenTelemetry
+  packages, and `PyJWT[crypto]` (all optional, lazily imported) at build
+  time, and its `HEALTHCHECK` is TLS-aware. `docker-compose.yml` has
+  `postgres`, `redis`, and `jaeger` Compose profiles alongside the default
+  (SQLite only, single container).
 - **Helm chart.** `helm/agenthive/` — SQLite+single-replica or
   Postgres+N-replicas (the chart refuses to render SQLite with more than
-  one replica, and refuses `autoscaling.enabled` without Postgres,
-  rather than let either fail confusingly at runtime — see
-  `templates/_helpers.tpl`'s `agenthive.validate`), optional Redis
-  wiring, Ingress or native TLS, and either a `ServiceMonitor`
+  one replica, and refuses `autoscaling.enabled` without Postgres, rather
+  than let either fail confusingly at runtime — see
+  `templates/_helpers.tpl`'s `agenthive.validate`), optional Redis wiring,
+  Ingress or native TLS, optional Azure AD, and either a `ServiceMonitor`
   (Prometheus Operator) or plain `prometheus.io/*` pod annotations for
   metrics scraping. See `helm/agenthive/README.md`.
 
-Open questions carried forward unchanged from v1: no L1→L2→L3 promotion
-worker, no LLM-request proxy (still deliberate), no token expiry policy,
-and the Redis rate limiter's fixed-window approximation (documented in
-DEPLOYMENT.md rather than treated as a defect - a request-rate guard
-doesn't need billing-grade precision).
+## Open questions
 
-## v3 - the entire journey, mapped
+- **No L1→L2→L3 promotion worker.** Everything sits at whatever tier it
+  was written at. This needs an LLM-driven summarization policy designed
+  against real usage data this service doesn't have yet - building it now
+  means guessing at what a good summary looks like. Revisit once there's
+  enough real L1 volume to know what a good policy looks like.
+- **No LLM-request proxy.** Not a missing feature - see "Why not build an
+  LLM-request proxy" above. Building one would reverse the central
+  decision this whole document argues for; closing it as a checklist item
+  would mean undoing the reason AgentHive is shaped the way it is, not
+  finishing it.
 
-v2 answered "is this working, in aggregate, over time" with metrics.
-This round answers a narrower, more immediate question a team actually
-asks while debugging or just curious: "for the retrieve_context call my
-agent just made, where did the time go, and what did the server
-actually do?" - plus made getting a new team from zero to using this at
-all a documented, ordered process instead of README archaeology.
-
-- **OpenTelemetry tracing (`tracing.py`).** Off by default -
-  `OTEL_EXPORTER_OTLP_ENDPOINT`/`AGENTHIVE_TRACING_CONSOLE` both unset
-  means zero cost, same pattern as `REDIS_URL`/`DATABASE_URL` being
-  unset. Instrumented at the `server.py` handler layer only (not inside
-  `db.py`/`cache.py`/`retrieval.py` internals) so those modules stay
-  free of a cross-cutting concern and keep their own test story simple -
-  the root span per request plus child spans for the rate-limit check,
-  auth lookup, cache lookup, graph traversal, the memory write, and the
-  approval-gate review together already show the whole journey without
-  needing tracing wired through every layer. `client.py` propagates the
-  current span's W3C `traceparent` header on every call (case-lowering
-  headers on the receiving end - stdlib `http.server` and `urllib`
-  capitalize header names on the wire, which would otherwise silently
-  break the standard propagator's case-sensitive lookup); wrapping
-  `retrieve_context`+`log_session` in `client.traced_session(...)` links
-  a whole agent session into one trace. Verified two ways:
-  `tests/test_tracing.py` uses the zero-infrastructure console exporter
-  against a real running server (including a real cross-process
-  propagation check - two separate `server.py`/script processes, same
-  pattern as the Redis rate-limiter test); separately, a real Jaeger
-  container was run during development and queried via its own API to
-  confirm OTLP export actually lands with the full expected span set,
-  not just that the code compiles.
-- **No hard dependency added.** `opentelemetry-api`/`-sdk`/`-exporter-otlp-proto-http`
-  are lazily imported (same pattern as `psycopg2`/`redis`) - a plain
-  `python3 server.py` with none of them installed still runs, with
-  `TRACER` becoming a tiny local no-op shim. The OTLP exporter is the
-  HTTP/protobuf variant specifically to avoid a `grpc` dependency.
-- **Graceful shutdown flushes traces.** The OTLP exporter batches spans
-  (~5s default export interval); SIGTERM previously had no handler in
-  `server.py` at all, so a container being stopped (the normal
-  Docker/Kubernetes shutdown path) would silently drop whatever hadn't
-  been flushed yet. `main()` now converts SIGTERM into the same
-  graceful-shutdown path as Ctrl+C and calls
-  `tracing.shutdown_tracing()` on the way out.
-- **`ONBOARDING.md`.** A single ordered walkthrough (install, create team,
-  add users, wire up an agent, review, auto-approve, watch it work, in
-  that order, rather than reference material split across files) for
-  taking a team from "nothing running" to "reviewing memory and watching
-  traces" -
-  install, create team, add users, wire up an agent, review, auto-approve
-  rules, then metrics/tracing. README.md stays the concept/reference
-  doc; this is the "do this, in this order" doc a new team actually
-  follows.
-- **Jaeger as the trace-visualization web UI.** Interpreted "a web UI"
-  for "the entire journey mapped and visualised" as the natural pairing
-  with tracing rather than a second, redundant dashboard next to the
-  review UI (`GET /ui`, unchanged) and Grafana (already the metrics
-  trend view) - a team that turns tracing on needs somewhere to actually
-  browse traces, and Jaeger's all-in-one image is that, wired as an
-  opt-in `docker compose --profile jaeger` service and a Helm
-  `tracing.otlpEndpoint` value, never bundled into the chart itself
-  (same reasoning as not bundling Postgres/Redis).
-
-Open questions carried forward: everything from v1/v2's lists, plus no
-trace sampling policy (every request is traced when tracing is enabled -
-fine at today's traffic, worth revisiting before very high throughput).
-
-## v4 - token expiry and trace sampling
-
-Closes two of the four gaps this ADR had been carrying forward since v1
-and v3. The other two - the L1→L2→L3 promotion worker and the
-LLM-request proxy - are still open on purpose, not by oversight; see
-below for why closing them isn't a matter of just writing the code.
-
-- **Token expiry (`AGENTHIVE_TOKEN_TTL_SECONDS`, `db.py`).** 0 (default)
-  keeps the original behavior - tokens are valid until an admin rotates
-  or revokes them. Set it, and every token minted or rotated from then on
-  carries a `token_expires_at`; `user_by_token` rejects an expired token
-  exactly like a revoked one (same 401, no distinguishing message - see
-  its docstring for why: not leaking "this token existed but expired"
-  versus "this token never existed" to whoever is holding it). Only
-  applies going forward - an existing token already in the database keeps
-  working until it's next rotated, so turning this on doesn't
-  retroactively lock out a whole team. `token_expires_at` migrates onto
-  both backends' `users` table additively (`ALTER TABLE ... ADD COLUMN`,
-  guarded for SQLite's lack of `IF NOT EXISTS` there) rather than
-  requiring a fresh database, consistent with "the schema translates
-  directly" from the original ADR.
-- **Trace sampling (`AGENTHIVE_TRACE_SAMPLE_RATIO`, `tracing.py`).** 1.0
-  (default) traces every request, unchanged from v3. Set below 1.0 and
-  `ParentBased(TraceIdRatioBased(ratio))` makes the sampling decision once
-  at the root span; every child span inherits it, so a sampled-in trace
-  is never left with only some of its spans exported. Head-based, not
-  tail-based - the decision is made before the request runs, so it can't
-  react to "actually this one was slow, keep it" the way a tail sampler
-  could. Fine for the stated goal (control cost/volume at high
-  throughput, not surface anomalies) - a team that needs the latter
-  should put a tail-sampling collector (Jaeger, an OTel Collector) in
-  front of the OTLP endpoint rather than rebuilding that logic here.
-- **Why the other two stay open.** The L1→L2→L3 promotion worker needs an
-  LLM-driven summarization policy designed against real usage data this
-  service doesn't have yet - building it now means guessing at what a
-  good summary looks like, the same "premature" judgment from v1,
-  unchanged by anything in this round. The LLM-request proxy is not a
-  missing feature at all; building it would reverse the central decision
-  this whole document argues for (see "Why not build an LLM-request
-  proxy" above) - closing it as a checklist item would mean undoing the
-  reason AgentHive is shaped the way it is, not finishing it.
+Both are deliberately deferred until there's real usage data to design
+against, rather than built speculatively now.

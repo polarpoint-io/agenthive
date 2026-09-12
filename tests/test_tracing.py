@@ -9,7 +9,8 @@ stdout, which we capture and parse back out.
 
 This doesn't (and can't, without a real collector) prove OTLP export
 works end to end - that was verified manually against a real Jaeger
-container during development (see ADR.md's "v3" section). What this DOES
+container during development (see ADR.md's "Reliability and observability"
+section). What this DOES
 prove: tracing.py's plumbing is correct (spans get created, named,
 attributed, and closed at the right points) and context propagation
 actually links a client call to the server spans it triggers - the part

@@ -87,8 +87,8 @@ Save `team.id` and `user.token` - every call from here on needs both.
 ## Step 3: Add your teammates
 
 Each person (or each service account an agent runs as) gets their own
-token, not a shared secret - this is the thing v0 of this project got
-wrong and v1 fixed (see `ADR.md`). Role is `admin` (can review pending
+token, not a shared secret (see `ADR.md`'s "Authentication" section).
+Role is `admin` (can review pending
 memory, manage users, configure auto-approve rules) or `member` (can
 read/write memory, manage agents/tasks):
 
@@ -102,6 +102,14 @@ Hand `alice`'s returned token to Alice, not to yourself - it's shown once
 here too. Repeat for everyone on the team. `admin.list_users()` /
 `GET /teams/{id}/users` shows who's set up so far (never shows tokens
 again, by design).
+
+**Prefer Microsoft sign-in over handing out tokens by hand?** Set the
+`AGENTHIVE_AZURE_*` env vars (see `.env.example`, or `helm upgrade --set
+auth.azureAd.enabled=true ...`) and `GET /ui` grows a "Sign in with
+Microsoft" button. It still needs this same step first, though - Azure AD
+sign-in links to a user created here, it never creates one on its own
+(see `README.md`'s "Azure AD sign-in" section and `ADR.md`'s
+"Authentication" section for why).
 
 ## Step 4: Register agents and tasks (optional)
 

@@ -1,0 +1,11 @@
+# Azure AD enabled with an inline clientSecret - exercises the conditional
+# Secret in templates/secret.yaml and the secretKeyRef-backed env var in
+# templates/deployment.yaml, alongside the plain ConfigMap entries for the
+# non-secret Azure AD config.
+auth:
+  azureAd:
+    enabled: true
+    tenantId: "11111111-1111-1111-1111-111111111111"
+    clientId: "22222222-2222-2222-2222-222222222222"
+    clientSecret: "ci-placeholder-not-a-real-secret"
+    redirectUri: "https://agenthive.example.com/auth/azure/callback"

@@ -70,6 +70,20 @@ would silently corrupt data or crash-loop:
 {{- if and .Values.ingress.enabled .Values.ingress.tls.enabled (not .Values.ingress.tls.secretName) -}}
 {{- fail "ingress.tls.enabled=true requires ingress.tls.secretName." -}}
 {{- end -}}
+{{- if .Values.auth.azureAd.enabled -}}
+{{- if not .Values.auth.azureAd.tenantId -}}
+{{- fail "auth.azureAd.enabled=true requires auth.azureAd.tenantId." -}}
+{{- end -}}
+{{- if not .Values.auth.azureAd.clientId -}}
+{{- fail "auth.azureAd.enabled=true requires auth.azureAd.clientId." -}}
+{{- end -}}
+{{- if not .Values.auth.azureAd.redirectUri -}}
+{{- fail "auth.azureAd.enabled=true requires auth.azureAd.redirectUri (must exactly match the Redirect URI registered on the Azure AD App Registration)." -}}
+{{- end -}}
+{{- if and (not .Values.auth.azureAd.clientSecret) (not .Values.auth.azureAd.existingSecret) -}}
+{{- fail "auth.azureAd.enabled=true requires either auth.azureAd.clientSecret or auth.azureAd.existingSecret." -}}
+{{- end -}}
+{{- end -}}
 {{- end -}}
 
 {{/*
@@ -116,6 +130,27 @@ redis-url
 
 {{- define "agenthive.scheme" -}}
 {{- if .Values.tls.enabled -}}https{{- else -}}http{{- end -}}
+{{- end -}}
+
+{{/*
+The Secret name/key holding the Azure AD client secret, whichever path
+produced it. Only meaningful when auth.azureAd.enabled - see
+agenthive.validate.
+*/}}
+{{- define "agenthive.azureAdSecretName" -}}
+{{- if .Values.auth.azureAd.existingSecret -}}
+{{ .Values.auth.azureAd.existingSecret }}
+{{- else -}}
+{{ include "agenthive.fullname" . }}-azure-ad
+{{- end -}}
+{{- end -}}
+
+{{- define "agenthive.azureAdSecretKey" -}}
+{{- if .Values.auth.azureAd.existingSecret -}}
+{{ .Values.auth.azureAd.existingSecretKey }}
+{{- else -}}
+client-secret
+{{- end -}}
 {{- end -}}
 
 {{/*

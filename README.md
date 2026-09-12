@@ -5,8 +5,7 @@
 A shared, reviewed memory graph for a team of coding agents: a
 team/agent/task graph with retrieval-by-traversal, and deliberately no
 proxy that intercepts and enriches every single LLM request. See
-[`ADR.md`](ADR.md) for the full reasoning, and its "v1" section for what
-changed since the original v0 prototype.
+[`ADR.md`](ADR.md) for the full reasoning.
 
 **Onboarding a team?** [`ONBOARDING.md`](ONBOARDING.md) is the
 step-by-step walkthrough - install, create a team, add teammates, wire
@@ -198,6 +197,34 @@ A `member` can log and retrieve memory, and manage agents/tasks. Only an
 `admin` can review pending memory, manage users, or configure
 auto-approve rules. Any user can rotate their own token.
 
+## Azure AD sign-in (humans only)
+
+Agents keep using their personal tokens exactly as above. Humans using the
+review UI (`GET /ui`) can *also* sign in with Azure AD (Microsoft Entra
+ID), once an admin sets four environment variables (see `.env.example`):
+
+```bash
+AGENTHIVE_AZURE_TENANT_ID=...
+AGENTHIVE_AZURE_CLIENT_ID=...
+AGENTHIVE_AZURE_CLIENT_SECRET=...
+AGENTHIVE_AZURE_REDIRECT_URI=https://agenthive.yourcompany.com/auth/azure/callback
+```
+
+That last one must exactly match a Redirect URI registered on the Azure
+AD App Registration. With all four set, `GET /ui` shows a "Sign in with
+Microsoft" button.
+
+Signing in with Microsoft never creates an AgentHive account by itself -
+there is no auto-provisioning (see `ADR.md`'s "Authentication" section
+for why). The first time someone signs in, they'll see their own Azure
+object id and a message that no AgentHive user is linked yet; an admin
+links it from the Users card (or `POST
+/teams/{team_id}/users/{user_id}/link-azure {"azure_oid": "..."}`), and
+from then on that person can sign in with Microsoft and lands as that
+user, with a session that expires automatically
+(`AGENTHIVE_AZURE_SESSION_TTL_SECONDS`, default 1 hour) rather than
+living forever like an agent's token.
+
 ## Testing
 
 ```bash
@@ -205,8 +232,8 @@ pip install -r requirements.txt
 pytest
 ```
 
-The suite spins up a real `server.py` per test (same "test against a
-running server, not mocks" philosophy as the original v0), against an
+The suite spins up a real `server.py` per test ("test against a running
+server, not mocks"), against an
 isolated SQLite file by default. Set `DATABASE_URL` to also exercise the
 Postgres backend, and `REDIS_URL_FOR_TESTS` for the Redis-backed rate
 limiter/cache tests (CI runs all three - see `.github/workflows/ci.yml`,
@@ -215,17 +242,20 @@ which also `helm lint`s and `helm template`s the chart).
 `tests/test_retrieval_unit.py` proves the traversal algorithm in
 isolation. `test_end_to_end.py`, `test_auth.py`, `test_autoapprove.py`,
 `test_rate_limit.py`, `test_metrics_and_cache.py`, `test_redis_backends.py`,
-`test_tls.py` and `test_tracing.py` prove the properties that matter for
-the design: the approval gate actually gates, team isolation actually
-isolates, roles are enforced, revoked/rotated tokens actually stop
-working, auto-approve rules actually match, the rate limiter actually
-limits (in-memory *and* shared via Redis across two real processes), a
-cache hit from a different user is counted as cross-user reuse, the
-server actually serves HTTPS when TLS is configured, and the write ->
-review -> retrieve journey actually produces the right spans with a
+`test_tls.py`, `test_tracing.py` and `test_oidc.py` prove the properties
+that matter for the design: the approval gate actually gates, team
+isolation actually isolates, roles are enforced, revoked/rotated tokens
+actually stop working, auto-approve rules actually match, the rate
+limiter actually limits (in-memory *and* shared via Redis across two real
+processes), a cache hit from a different user is counted as cross-user
+reuse, the server actually serves HTTPS when TLS is configured, the write
+-> review -> retrieve journey actually produces the right spans with a
 shared trace id across a propagated call (using the zero-infrastructure
 console exporter; real OTLP export to Jaeger was verified manually
-during development - see `ADR.md`'s "v3" section).
+during development - see `ADR.md`'s "Reliability and observability"
+section), and Azure AD sign-in actually mints a working session only for
+a linked user, against a real locally-generated RSA keypair and JWKS
+endpoint rather than a mocked signature check.
 
 ## Metrics: does this actually reduce token usage and get reused?
 
@@ -274,12 +304,13 @@ to see one agent session's whole journey as a single connected trace
 `traceparent` header) instead of two separate ones. See `tracing.py`'s
 docstring for the full design, and `ONBOARDING.md`'s "Watch it work"
 step for a guided first look. Verified against a real Jaeger instance
-during development, not just the console exporter - see `ADR.md`'s "v3"
-section.
+during development, not just the console exporter - see `ADR.md`'s
+"Reliability and observability" section.
 
 ## Token expiry and trace sampling
 
-Both closed as of v4 (see `ADR.md`'s "v4" section):
+See `ADR.md`'s "Authentication" and "Reliability and observability"
+sections:
 
 - **`AGENTHIVE_TOKEN_TTL_SECONDS`** (default `0`, never expires - the
   original behavior). Set it and every token minted or rotated from then
@@ -307,9 +338,8 @@ See `ADR.md`'s "Open questions" section in full, but the short version:
 
 The Redis rate limiter is also still a fixed window, not a true sliding
 window - see `DEPLOYMENT.md`'s "Known limitations". TLS, multi-node
-rate-limit/cache sharing (v2), token expiry, and trace sampling (v4) were
-all flagged as gaps at some point and are closed as of the version noted
-- see `ADR.md`.
+rate-limit/cache sharing, token expiry, and trace sampling were all
+flagged as gaps at some point and are closed now - see `ADR.md`.
 
 ## Files
 
@@ -318,6 +348,7 @@ all flagged as gaps at some point and are closed as of the version noted
 - `cache.py` - the retrieval cache (in-memory or Redis-backed)
 - `metrics.py` - Prometheus metrics, served at `GET /metrics`
 - `tracing.py` - OpenTelemetry distributed tracing, off by default (see `ONBOARDING.md`/`OTEL_EXPORTER_OTLP_ENDPOINT`/`AGENTHIVE_TRACING_CONSOLE`)
+- `oidc.py` - Azure AD (Microsoft Entra ID) login for the review UI, humans only - PKCE, JWKS verification, off unless `AGENTHIVE_AZURE_*` is set
 - `db.py` - storage layer: SQLite and Postgres backends behind one schema, plus the access log behind reuse metrics
 - `retrieval.py` - the traversal algorithm, scoped to team + approved-only
 - `server.py` - the HTTP API (stdlib `http.server`) + structured logging + health checks + TLS + tracing

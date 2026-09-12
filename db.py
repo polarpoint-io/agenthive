@@ -38,10 +38,17 @@ CREATE TABLE IF NOT EXISTS users (
     created_by TEXT,
     last_used_at TEXT,
     revoked_at TEXT,
-    token_expires_at TEXT
+    token_expires_at TEXT,
+    azure_oid TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_users_team ON users(team_id);
+
+-- The unique index on users.azure_oid is NOT created here, deliberately -
+-- see the "Only one AgentHive user per Azure AD object id" comment in
+-- SqliteBackend/PostgresBackend.__init__ below for why it has to run
+-- after the additive azure_oid migration instead of inline with the rest
+-- of this schema.
 
 CREATE TABLE IF NOT EXISTS agents (
     id TEXT PRIMARY KEY,
@@ -114,6 +121,32 @@ CREATE TABLE IF NOT EXISTS memory_access_log (
 
 CREATE INDEX IF NOT EXISTS idx_access_team ON memory_access_log(team_id);
 CREATE INDEX IF NOT EXISTS idx_access_node ON memory_access_log(node_id);
+
+-- Short-lived, single-use: one row per in-flight Azure AD login attempt,
+-- created at GET /auth/azure/login and deleted the moment GET
+-- /auth/azure/callback consumes it (success or failure - never replayed).
+-- The PKCE code_verifier lives here, server-side, rather than in the
+-- browser - see oidc.py / config.py.
+CREATE TABLE IF NOT EXISTS oidc_states (
+    state TEXT PRIMARY KEY,
+    code_verifier TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+
+-- A session minted by a successful Azure AD sign-in, bound to an existing
+-- AgentHive user (see users.azure_oid). Functions exactly like the opaque
+-- per-user token from an auth standpoint (see auth.py's user_by_token /
+-- this file's session_by_token) but is short-lived on purpose - see
+-- config.py's AGENTHIVE_AZURE_SESSION_TTL_SECONDS.
+CREATE TABLE IF NOT EXISTS sessions (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id),
+    token_hash TEXT NOT NULL UNIQUE,
+    created_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
 """
 
 
@@ -159,6 +192,22 @@ class SqliteBackend:
                 conn.execute("ALTER TABLE users ADD COLUMN token_expires_at TEXT")
             except sqlite3.OperationalError:
                 pass  # already has the column
+            try:
+                conn.execute("ALTER TABLE users ADD COLUMN azure_oid TEXT")
+            except sqlite3.OperationalError:
+                pass  # already has the column
+            # Only one AgentHive user per Azure AD object id - a partial
+            # index (NULLs excluded) rather than a plain UNIQUE column
+            # constraint, since most rows never get linked. Created here,
+            # after the ALTER TABLE above, rather than inline in SCHEMA:
+            # on a pre-existing database SCHEMA's own "CREATE TABLE IF NOT
+            # EXISTS users" is a no-op (the table already exists without
+            # this column), so an index on azure_oid would fail with "no
+            # such column" if it ran before this migration added it.
+            conn.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_azure_oid "
+                "ON users(azure_oid) WHERE azure_oid IS NOT NULL"
+            )
 
     @contextmanager
     def _conn(self):
@@ -217,6 +266,14 @@ class PostgresBackend:
                 # Same additive migration as SqliteBackend - Postgres does
                 # support IF NOT EXISTS here, so no try/except needed.
                 cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS token_expires_at TEXT")
+                cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS azure_oid TEXT")
+                # See the matching comment in SqliteBackend.__init__ for
+                # why this index is created here rather than inline in
+                # SCHEMA.
+                cur.execute(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_azure_oid "
+                    "ON users(azure_oid) WHERE azure_oid IS NOT NULL"
+                )
 
     @contextmanager
     def _conn(self):
@@ -329,7 +386,8 @@ class Store:
 
     def list_users(self, team_id: str):
         rows = self.backend.query_all(
-            "SELECT id, team_id, name, role, created_at, created_by, last_used_at, revoked_at, token_expires_at "
+            "SELECT id, team_id, name, role, created_at, created_by, last_used_at, "
+            "revoked_at, token_expires_at, azure_oid "
             "FROM users WHERE team_id = ? ORDER BY created_at",
             (team_id,),
         )
@@ -337,7 +395,8 @@ class Store:
 
     def get_user(self, user_id: str):
         row = self.backend.query_one(
-            "SELECT id, team_id, name, role, created_at, created_by, last_used_at, revoked_at, token_expires_at "
+            "SELECT id, team_id, name, role, created_at, created_by, last_used_at, "
+            "revoked_at, token_expires_at, azure_oid "
             "FROM users WHERE id = ?",
             (user_id,),
         )
@@ -383,6 +442,110 @@ class Store:
         self.backend.execute(
             "UPDATE users SET revoked_at = ? WHERE id = ?", (now(), user_id)
         )
+
+    # ---- Azure AD linking + sessions (see oidc.py / ADR.md "Authentication") ----
+
+    def user_by_azure_oid(self, azure_oid: str):
+        return self.backend.query_one(
+            "SELECT * FROM users WHERE azure_oid = ? AND revoked_at IS NULL",
+            (azure_oid,),
+        )
+
+    def link_azure_user(self, team_id: str, user_id: str, azure_oid: str):
+        """Admin-only, explicit action - see ADR.md's "No auto-provisioning"
+        reasoning. Raises ValueError if this Azure AD object id is already
+        linked to a different user (the partial unique index on
+        users.azure_oid enforces this at the DB level; both backends raise
+        their own integrity-error type here, so we catch broadly)."""
+        target = self.get_user(user_id)
+        if not target or target["team_id"] != team_id:
+            raise ValueError("user not found for this team")
+        try:
+            self.backend.execute(
+                "UPDATE users SET azure_oid = ? WHERE id = ?", (azure_oid, user_id)
+            )
+        except Exception as e:
+            raise ValueError(
+                "this Azure AD account is already linked to a different user"
+            ) from e
+
+    def unlink_azure_user(self, team_id: str, user_id: str):
+        target = self.get_user(user_id)
+        if not target or target["team_id"] != team_id:
+            raise ValueError("user not found for this team")
+        self.backend.execute(
+            "UPDATE users SET azure_oid = NULL WHERE id = ?", (user_id,)
+        )
+
+    def create_oidc_state(self, state: str, code_verifier: str):
+        """One row per in-flight Azure AD login attempt - see
+        oidc_states in db.py's SCHEMA."""
+        self.backend.execute(
+            "INSERT INTO oidc_states (state, code_verifier, created_at) VALUES (?, ?, ?)",
+            (state, code_verifier, now()),
+        )
+
+    def consume_oidc_state(self, state: str, max_age_seconds: int = 600):
+        """Single-use: the row is deleted whether or not it was found or
+        still fresh, so a state value is never usable twice (replay
+        protection) - only the first callback with a given state can
+        possibly succeed. Returns the code_verifier, or None if the state
+        is unknown or older than max_age_seconds (an abandoned/expired
+        login attempt)."""
+        row = self.backend.query_one(
+            "SELECT * FROM oidc_states WHERE state = ?", (state,)
+        )
+        if not row:
+            return None
+        self.backend.execute("DELETE FROM oidc_states WHERE state = ?", (state,))
+        cutoff = time.strftime(
+            "%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() - max_age_seconds)
+        )
+        if row["created_at"] < cutoff:
+            return None
+        return row["code_verifier"]
+
+    def create_session(self, user_id: str):
+        """Mints a session token for a human who just signed in via Azure
+        AD - functions exactly like a personal API token from server.py's
+        point of view (see session_by_token) but expires automatically
+        after CONFIG.oidc_session_ttl_seconds, unlike an agent's token.
+        Returns (token, expires_at)."""
+        from auth import generate_token, hash_token
+        from config import CONFIG
+
+        token = generate_token()
+        session_id = new_id()
+        expires_at = time.strftime(
+            "%Y-%m-%dT%H:%M:%SZ",
+            time.gmtime(time.time() + CONFIG.oidc_session_ttl_seconds),
+        )
+        self.backend.execute(
+            "INSERT INTO sessions (id, user_id, token_hash, created_at, expires_at) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (session_id, user_id, hash_token(token), now(), expires_at),
+        )
+        return token, expires_at
+
+    def session_by_token(self, token: str):
+        """Returns the active user dict for a session token, or None - same
+        shape/contract as user_by_token, so server.py's _authenticate can
+        try both without caring which one matched. An expired session
+        fails exactly like a missing one (see user_by_token's docstring
+        for the same not-leaking-which-case reasoning)."""
+        from auth import hash_token
+
+        token_hash = hash_token(token)
+        row = self.backend.query_one(
+            "SELECT u.* FROM sessions s JOIN users u ON u.id = s.user_id "
+            "WHERE s.token_hash = ? AND s.expires_at > ? AND u.revoked_at IS NULL",
+            (token_hash, now()),
+        )
+        if row:
+            self.backend.execute(
+                "UPDATE users SET last_used_at = ? WHERE id = ?", (now(), row["id"])
+            )
+        return row
 
     # ---- agents ----
 

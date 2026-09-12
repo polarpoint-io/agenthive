@@ -84,7 +84,8 @@ class Config:
     # and the retrieval cache across multiple replicas. Unset means both
     # fall back to in-memory, per-process state - correct for a single
     # replica, a soft (not hard) guard once you run more than one. See
-    # DEPLOYMENT.md "Known limitations" and ADR.md "v2".
+    # DEPLOYMENT.md "Known limitations" and ADR.md's "Reliability and
+    # observability" section.
     redis_url: str = os.environ.get("REDIS_URL", "")
 
     # --- retrieval cache ---
@@ -123,14 +124,55 @@ class Config:
     tracing_console: bool = _bool("AGENTHIVE_TRACING_CONSOLE", False)
 
     # Head-based sampling ratio in [0.0, 1.0]. 1.0 (default) traces every
-    # request - fine at the traffic this service sees today (see ADR.md
-    # "Open questions"), but a high-throughput deployment should turn this
-    # down rather than pay for and store a trace per request. The decision
+    # request - fine at the traffic this service sees today (see ADR.md's
+    # "Reliability and observability" section), but a high-throughput
+    # deployment should turn this down rather than pay for and store a
+    # trace per request. The decision
     # is made once per trace, at the root span, via OpenTelemetry's
     # standard ParentBased(TraceIdRatioBased(...)) sampler - see
     # tracing.py - so a sampled-in trace stays fully sampled end to end
     # instead of dropping spans partway through.
     trace_sample_ratio: float = _float("AGENTHIVE_TRACE_SAMPLE_RATIO", 1.0)
+
+    # --- Azure AD (Microsoft Entra ID) login, humans only ---
+    # Agents keep using their existing opaque per-user tokens unchanged -
+    # this adds a second, optional login path for the humans who use the
+    # review UI (see ui/index.html), via the standard OAuth2 Authorization
+    # Code flow + PKCE. The token exchange and PKCE code_verifier are kept
+    # server-side (see oidc.py) rather than in browser JavaScript, so this
+    # is a confidential client, not a SPA/public client.
+    #
+    # A successful Azure sign-in only ever produces a session for an
+    # AgentHive user that already exists and has been explicitly linked to
+    # that Azure AD object id by an admin (see server.py's
+    # link-azure/unlink-azure routes) - there is no auto-provisioning. See
+    # ADR.md's "Authentication" section for the reasoning.
+    #
+    # All four of tenant_id/client_id/client_secret/redirect_uri must be
+    # set for the feature to turn on at all (see oidc_enabled below); any
+    # one left empty means /auth/azure/* routes report themselves as
+    # disabled rather than half-configuring.
+    azure_ad_tenant_id: str = os.environ.get("AGENTHIVE_AZURE_TENANT_ID", "")
+    azure_ad_client_id: str = os.environ.get("AGENTHIVE_AZURE_CLIENT_ID", "")
+    azure_ad_client_secret: str = os.environ.get("AGENTHIVE_AZURE_CLIENT_SECRET", "")
+    # Must exactly match a Redirect URI registered on the Azure AD App
+    # Registration, e.g. https://agenthive.yourcompany.com/auth/azure/callback
+    azure_ad_redirect_uri: str = os.environ.get("AGENTHIVE_AZURE_REDIRECT_URI", "")
+
+    # How long a session minted by a successful Azure sign-in lasts before
+    # the human has to sign in again. Deliberately much shorter than the
+    # (optional) agent token TTL above - a human re-authenticating against
+    # Azure AD periodically is normal and expected; an agent doing so is not.
+    oidc_session_ttl_seconds: int = _int("AGENTHIVE_AZURE_SESSION_TTL_SECONDS", 3600)
+
+    @property
+    def oidc_enabled(self) -> bool:
+        return bool(
+            self.azure_ad_tenant_id
+            and self.azure_ad_client_id
+            and self.azure_ad_client_secret
+            and self.azure_ad_redirect_uri
+        )
 
     @classmethod
     def from_env(cls) -> "Config":

@@ -34,3 +34,11 @@ data:
   {{- if .Values.auth.tokenTtlSeconds }}
   AGENTHIVE_TOKEN_TTL_SECONDS: {{ .Values.auth.tokenTtlSeconds | quote }}
   {{- end }}
+  {{- if .Values.auth.azureAd.enabled }}
+  AGENTHIVE_AZURE_TENANT_ID: {{ .Values.auth.azureAd.tenantId | quote }}
+  AGENTHIVE_AZURE_CLIENT_ID: {{ .Values.auth.azureAd.clientId | quote }}
+  AGENTHIVE_AZURE_REDIRECT_URI: {{ .Values.auth.azureAd.redirectUri | quote }}
+  {{- if ne (.Values.auth.azureAd.sessionTtlSeconds | int) 3600 }}
+  AGENTHIVE_AZURE_SESSION_TTL_SECONDS: {{ .Values.auth.azureAd.sessionTtlSeconds | quote }}
+  {{- end }}
+  {{- end }}

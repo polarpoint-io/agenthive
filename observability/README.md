@@ -103,7 +103,8 @@ instrumentation is working before wiring up a real backend.
 other OTLP/HTTP-compatible backend - this is the "web UI" for actually
 browsing traces, separate from the review UI (`GET /ui`) and Grafana
 (the metrics trend view). See `ONBOARDING.md`'s "Watch it work" step for
-a guided first look, and `ADR.md`'s "v3" section for why it's
+a guided first look, and `ADR.md`'s "Reliability and observability"
+section for why it's
 instrumented where it is (the `server.py` handler layer, not inside
 `db.py`/`cache.py`/`retrieval.py`) and how cross-process trace
 propagation was actually verified, not just assumed to work.

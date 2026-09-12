@@ -199,15 +199,17 @@ most for a production deploy:
 | `AGENTHIVE_TRACING_CONSOLE` | `true` prints each finished span as JSON to stdout - no backend needed |
 | `AGENTHIVE_TRACE_SAMPLE_RATIO` | Head-based sampling ratio, `0.0`-`1.0` (default `1.0` - trace everything) |
 | `AGENTHIVE_TOKEN_TTL_SECONDS` | Tokens minted/rotated after this is set expire after this many seconds (default `0` - never) |
+| `AGENTHIVE_AZURE_TENANT_ID` / `_CLIENT_ID` / `_CLIENT_SECRET` / `_REDIRECT_URI` | Azure AD sign-in for the review UI, humans only - off unless all four are set (see ADR.md's "Authentication" section) |
+| `AGENTHIVE_AZURE_SESSION_TTL_SECONDS` | How long a session minted by Azure sign-in lasts (default `3600`) |
 | `AGENTHIVE_LOG_JSON` | `true` for JSON lines (recommended behind a log aggregator) |
 
 ## Known limitations
 
-Gaps flagged in earlier versions and since closed (see ADR.md for the
-reasoning behind each): TLS natively, and rate limiting/caching shared
-across replicas when `REDIS_URL` is set (v2); token expiry via
-`AGENTHIVE_TOKEN_TTL_SECONDS` and head-based trace sampling via
-`AGENTHIVE_TRACE_SAMPLE_RATIO` (v4). What's still true:
+Gaps this project used to carry and has since closed (see ADR.md for the
+reasoning behind each): TLS natively, rate limiting/caching shared across
+replicas when `REDIS_URL` is set, token expiry via
+`AGENTHIVE_TOKEN_TTL_SECONDS`, and head-based trace sampling via
+`AGENTHIVE_TRACE_SAMPLE_RATIO`. What's still true:
 
 - **The Redis-backed rate limiter is a fixed window, not a true sliding
   window** (one `INCR` + one `EXPIRE` per call, see `auth.py`) - up to a
@@ -225,3 +227,9 @@ across replicas when `REDIS_URL` is set (v2); token expiry via
   at a fixed rate. A team that needs tail-based sampling should put a
   collector capable of it (an OTel Collector, Jaeger's own) in front of
   the OTLP endpoint rather than expecting this ratio to do that job.
+- **Linking an Azure AD account is a manual admin step, on purpose.**
+  Signing in with Microsoft never auto-creates or auto-links an AgentHive
+  user (see ADR.md's "Authentication" section) - a person who hasn't been
+  linked yet sees their Azure object id and has to ask an admin to run
+  `link-azure`. This is deliberately not self-service; there is no
+  "request access" flow.

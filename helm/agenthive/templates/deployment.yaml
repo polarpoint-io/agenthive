@@ -69,6 +69,13 @@ spec:
                   name: {{ include "agenthive.redisSecretName" . }}
                   key: {{ include "agenthive.redisSecretKey" . }}
             {{- end }}
+            {{- if .Values.auth.azureAd.enabled }}
+            - name: AGENTHIVE_AZURE_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "agenthive.azureAdSecretName" . }}
+                  key: {{ include "agenthive.azureAdSecretKey" . }}
+            {{- end }}
             {{- with .Values.extraEnv }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
