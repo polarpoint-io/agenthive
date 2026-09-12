@@ -1,6 +1,8 @@
 apiVersion: v2
 name: agenthive
-description: A shared, reviewed memory graph for a team of coding agents (SQLite or Postgres, optional Redis-shared caching/rate-limiting, Prometheus metrics, OpenTelemetry tracing)
+description: A shared, reviewed memory graph for a team of coding agents (SQLite
+  or Postgres, optional Redis-shared caching/rate-limiting, Prometheus metrics,
+  OpenTelemetry tracing)
 type: application
 
 # Written by semantic-release from the conventional commits on main; do not
