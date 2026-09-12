@@ -1,16 +1,30 @@
 # AgentHive
 
-A shared, reviewed memory graph for a team of coding agents. Built after
-reading TencentDB Agent Memory's install doc and deciding to keep the parts
-that earn their cost (a team/agent/task graph, retrieval-by-traversal) and
-drop the part that doesn't (a proxy that intercepts and enriches every
-single LLM request). See [`ADR.md`](ADR.md) for the full reasoning, and
-its "v1" section for what changed since the original v0 prototype.
+![AgentHive](static/hero.svg)
+
+A shared, reviewed memory graph for a team of coding agents: a
+team/agent/task graph with retrieval-by-traversal, and deliberately no
+proxy that intercepts and enriches every single LLM request. See
+[`ADR.md`](ADR.md) for the full reasoning, and its "v1" section for what
+changed since the original v0 prototype.
 
 **Onboarding a team?** [`ONBOARDING.md`](ONBOARDING.md) is the
 step-by-step walkthrough - install, create a team, add teammates, wire
 up an agent, review your first memory, and watch it work. This README is
 the concept/reference doc; that one is the "do this, in this order" doc.
+
+## Architecture
+
+A System Context view (who and what talks to AgentHive) and a Container
+view (what's inside it) - C4 model, source in
+[`docs/diagrams/`](docs/diagrams/) as plain PlantUML against the
+[C4-PlantUML](https://github.com/plantuml-stdlib/C4-PlantUML) stdlib, so
+they render with any standard PlantUML toolchain and stay diffable in a
+PR.
+
+![System Context](docs/diagrams/c4-context.svg)
+
+![Container Diagram](docs/diagrams/c4-container.svg)
 
 ## What it actually does
 
@@ -66,11 +80,16 @@ the concept/reference doc; that one is the "do this, in this order" doc.
   (retrieve + log) into one trace with `traced_session(...)`. Off by
   default, zero cost when unset. See `tracing.py` and `ONBOARDING.md`'s
   "Watch it work" step.
-- **Docker and Helm:** `docker compose up` for a single host,
-  `helm install` (see `helm/agenthive/`) for Kubernetes - SQLite+1
-  replica or Postgres+N replicas, with Redis, Ingress/TLS, Prometheus
-  scraping, and tracing all wired through chart values. `docker compose
-  --profile jaeger up` gives you a trace-browsing web UI in one command.
+- **Docker and Helm, the same shape as the rest of polarpoint-io:**
+  `docker compose up` for a single host; for Kubernetes, `helm install`
+  against the chart in `helm/agenthive/` (SQLite+1 replica or
+  Postgres+N replicas, with Redis, Ingress/TLS, Prometheus scraping, and
+  tracing all wired through chart values). Images publish to
+  `ghcr.io/polarpoint-io/agenthive` and the chart to
+  `oci://ghcr.io/polarpoint-io/charts` - both driven by conventional
+  commits on `main` via semantic-release, the same release pipeline used
+  across the org (see `.github/workflows/`). `docker compose --profile
+  jaeger up` gives you a trace-browsing web UI in one command.
 
 ## Running it
 
@@ -266,7 +285,7 @@ See `ADR.md`'s "Open questions" section in full, but the short version:
   it was written at. Building an LLM-driven summarization pass against
   limited real usage data is still premature.
 - **No LLM-request proxy.** This was a deliberate choice, not a missing
-  feature - see `ADR.md`'s "Why not build what TencentDB built" section.
+  feature - see `ADR.md`'s "Why not build an LLM-request proxy" section.
 - **No token expiry policy**, and the Redis rate limiter is a fixed
   window, not a true sliding window - see `DEPLOYMENT.md`'s "Known
   limitations". TLS and multi-node rate-limit/cache sharing, both
@@ -292,6 +311,10 @@ See `ADR.md`'s "Open questions" section in full, but the short version:
 - `tests/` - pytest suite (unit + end-to-end against a real running server, incl. Redis, TLS, and tracing)
 - `Dockerfile`, `docker-compose.yml` - container packaging (SQLite, Postgres, Redis, and/or Jaeger profiles)
 - `helm/agenthive/` - Kubernetes Helm chart (see its own README.md)
+- `.github/workflows/` - `ci.yml` (pytest against SQLite/Postgres/Redis), `chart.yml` (helm lint + render + validate), `images.yml` (build/push to GHCR), `release.yml` (semantic-release from conventional commits on `main`)
+- `Makefile`, `.releaserc.json`, `commitlint.config.js`, `package.json` - the same local build/release tooling used across polarpoint-io
+- `docs/diagrams/` - C4 Context/Container diagrams (PlantUML source + rendered SVG)
+- `static/hero.svg` - the banner at the top of this file (`hack/build_hero.py` regenerates it)
 - `observability/` - Grafana dashboard + the metrics/tracing reference
 - `ONBOARDING.md` - step-by-step walkthrough for getting a real team from zero to using this
 - `DEPLOYMENT.md` - Docker/Kubernetes/Postgres/Redis/TLS/tracing/systemd setup, env vars, known limitations

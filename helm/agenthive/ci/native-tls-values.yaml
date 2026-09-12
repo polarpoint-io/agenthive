@@ -1,0 +1,6 @@
+# Native TLS instead of terminating at an Ingress/reverse proxy -
+# exercises the tls.* branch of _helpers.tpl and the Secret/probe
+# templates that switch scheme to https.
+tls:
+  enabled: true
+  secretName: agenthive-tls

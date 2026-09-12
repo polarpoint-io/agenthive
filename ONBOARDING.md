@@ -44,10 +44,11 @@ curl http://localhost:8790/healthz   # {"status": "ok"}
 **Path C - Kubernetes, for a team that already lives there:**
 
 ```bash
-helm install agenthive helm/agenthive \
-  --set image.repository=your-registry/agenthive --set image.tag=1.0.0
+helm install agenthive helm/agenthive
 kubectl port-forward svc/agenthive 8790:8790
 ```
+
+That's the chart's own default image (`ghcr.io/polarpoint-io/agenthive`).
 
 See [`helm/agenthive/README.md`](helm/agenthive/README.md) for
 Postgres/Redis/Ingress/TLS on this path - the defaults here are SQLite,
@@ -142,7 +143,7 @@ client.log_session(
 
 That's the entire integration surface. There is no proxy to route
 through and no per-client config format to get right (see `ADR.md`'s
-"Why not build what TencentDB built") - any agent that can make an HTTP
+"Why not build an LLM-request proxy") - any agent that can make an HTTP
 call, or `import client`, can do this.
 
 > 💡 Wrap both calls in `with client.traced_session("your-session-name"):`

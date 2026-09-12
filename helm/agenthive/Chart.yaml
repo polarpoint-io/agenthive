@@ -1,14 +1,32 @@
 apiVersion: v2
 name: agenthive
-description: A shared, reviewed memory graph for a team of coding agents (SQLite or Postgres, optional Redis-shared caching/rate-limiting, Prometheus metrics)
+description: A shared, reviewed memory graph for a team of coding agents (SQLite or Postgres, optional Redis-shared caching/rate-limiting, Prometheus metrics, OpenTelemetry tracing)
 type: application
+
+# Written by semantic-release from the conventional commits on main; do not
+# edit by hand. This is also the tag of the image this chart defaults to,
+# because it's built from the same release (see .github/workflows/release.yml
+# and images.yml).
 version: 1.0.0
 appVersion: "1.0.0"
-home: https://github.com/your-org/agenthive
+
+kubeVersion: ">=1.25.0-0"
+
+home: https://github.com/polarpoint-io/agenthive
+sources:
+  - https://github.com/polarpoint-io/agenthive
+
 keywords:
   - agents
   - memory
   - llm
   - coding-agents
+  - opentelemetry
+
 maintainers:
-  - name: Surj
+  - name: Polarpoint
+    url: https://github.com/polarpoint-io
+
+annotations:
+  artifacthub.io/license: MIT
+  artifacthub.io/containsSecurityUpdates: "false"

@@ -1,0 +1,22 @@
+@startuml
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Context.puml
+
+LAYOUT_WITH_LEGEND()
+title AgentHive - System Context
+
+Person(admin, "Team Admin", "Reviews pending memory, manages users and auto-approve rules")
+Person(member, "Team Member", "Runs a coding-agent session against the team's memory")
+
+System(agenthive, "AgentHive", "Shared, reviewed memory graph for a team of coding agents - team/agent/task scoped, bounded retrieval by traversal")
+
+System_Ext(coding_agent, "Coding Agent Session", "Claude Code, Cursor, or any agent runtime - calls retrieve_context once at session start and log_session once at session end")
+System_Ext(otel_backend, "OTLP Backend", "Jaeger, Tempo, or any OTLP/HTTP-compatible tracing backend")
+System_Ext(prometheus, "Prometheus", "Scrapes token-reduction, cache-reuse and graph-growth metrics on an interval")
+
+Rel(member, coding_agent, "Runs")
+Rel(coding_agent, agenthive, "retrieve_context / log_session", "HTTPS/JSON")
+Rel(admin, agenthive, "Reviews pending memory, manages users, configures auto-approve rules", "HTTPS")
+Rel(agenthive, otel_backend, "Exports one trace per request when tracing is enabled", "OTLP/HTTP")
+Rel(prometheus, agenthive, "Scrapes", "HTTP GET /metrics")
+
+@enduml

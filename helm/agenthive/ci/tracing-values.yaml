@@ -1,0 +1,5 @@
+# Tracing wired to an OTLP backend - exercises the tracing.* ConfigMap
+# entries that only render when a value here is actually set.
+tracing:
+  otlpEndpoint: "http://jaeger-collector.observability:4318"
+  console: true

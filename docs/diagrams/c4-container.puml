@@ -1,0 +1,28 @@
+@startuml
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+
+LAYOUT_WITH_LEGEND()
+title AgentHive - Container Diagram
+
+Person(admin, "Team Admin", "Reviews pending memory, manages users and auto-approve rules")
+Person(member, "Team Member", "Runs a coding-agent session against the team's memory")
+
+System_Ext(coding_agent, "Coding Agent Session", "client.py - retrieve_context at session start, log_session at session end")
+System_Ext(otel_backend, "OTLP Backend", "Jaeger, Tempo, or any OTLP/HTTP-compatible tracing backend")
+System_Ext(prometheus, "Prometheus", "Scrapes on an interval")
+
+System_Boundary(agenthive, "AgentHive") {
+  Container(api, "AgentHive Service", "Python 3.11, stdlib http.server (ThreadingHTTPServer)", "Auth + rate limiting, the approval gate, bounded retrieval by traversal, the review UI (GET /ui), Prometheus metrics (GET /metrics), and OpenTelemetry spans")
+  ContainerDb(db, "Memory Store", "SQLite file or PostgreSQL", "Teams, users, agents, tasks, tiered memory nodes (pending / approved / rejected), and the per-retrieval access log")
+  ContainerDb(cache, "Rate Limiter + Retrieval Cache", "In-memory (single replica) or Redis (shared across replicas)", "Per-token rate-limit counters; cached bounded-traversal results with cross-user reuse tracking")
+}
+
+Rel(member, coding_agent, "Runs")
+Rel(coding_agent, api, "retrieve_context / log_session", "HTTPS/JSON, X-API-Key")
+Rel(admin, api, "Reviews, manages users, configures rules", "HTTPS")
+Rel(api, db, "Reads/writes", "SQL")
+Rel(api, cache, "Rate-limit checks, cache lookups and writes", "in-process, or Redis protocol")
+Rel(api, otel_backend, "Exports spans when tracing is enabled", "OTLP/HTTP")
+Rel(prometheus, api, "Scrapes", "HTTP GET /metrics")
+
+@enduml

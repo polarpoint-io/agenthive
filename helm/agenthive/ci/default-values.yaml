@@ -1,0 +1,3 @@
+# Renders the chart exactly as its own defaults: SQLite, 1 replica, no
+# Redis, no TLS, no Ingress. The baseline every other ci/ scenario is
+# layered on top of.

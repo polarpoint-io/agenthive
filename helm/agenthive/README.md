@@ -3,17 +3,19 @@
 ## Quick start (SQLite, single replica, no Ingress)
 
 ```bash
-helm install agenthive helm/agenthive \
-  --set image.repository=your-registry/agenthive \
-  --set image.tag=1.0.0
+helm install agenthive helm/agenthive
 
 kubectl port-forward svc/agenthive 8790:8790
 open http://127.0.0.1:8790/ui
 ```
 
 This is the whole thing for a small team on a single cluster: one pod,
-one PVC, SQLite. `helm test agenthive` hits `/healthz` and `/readyz`
-to confirm it came up.
+one PVC, SQLite, and the chart's own default image
+(`ghcr.io/polarpoint-io/agenthive`, built and released alongside the
+chart - see `.github/workflows/release.yml`/`images.yml`). `helm test
+agenthive` hits `/healthz` and `/readyz` to confirm it came up. Point at
+a different registry with `--set image.registry=... --set
+image.repository=...`.
 
 ## Postgres + Redis + Ingress (multiple replicas)
 
@@ -26,8 +28,6 @@ per-replica:
 ```bash
 helm install agenthive helm/agenthive \
   -f helm/agenthive/values-postgres-example.yaml \
-  --set image.repository=your-registry/agenthive \
-  --set image.tag=1.0.0 \
   --set database.postgres.existingSecret=agenthive-db \
   --set redis.existingSecret=agenthive-redis \
   --set ingress.host=agenthive.yourcompany.com

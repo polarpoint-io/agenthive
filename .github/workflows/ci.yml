@@ -65,17 +65,7 @@ jobs:
           REDIS_URL_FOR_TESTS: redis://localhost:6379/0
         run: pytest -v tests/test_redis_backends.py
 
-  helm-lint:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: azure/setup-helm@v4
-        with:
-          version: "v3.15.0"
-      - run: helm lint helm/agenthive
-      - run: helm template agenthive helm/agenthive > /dev/null
-      - run: helm template agenthive helm/agenthive -f helm/agenthive/values-postgres-example.yaml > /dev/null
-      - run: >
-          helm template agenthive helm/agenthive
-          --set tracing.otlpEndpoint=http://jaeger-collector.observability:4318
-          --set tracing.console=true > /dev/null
+# Chart lint/render/validate lives in .github/workflows/chart.yml, and image
+# build/push in .github/workflows/images.yml - split out the same way as the
+# rest of polarpoint-io (see helm-mirofish) so each concern gets its own path
+# filter and doesn't rebuild on every Python-only change.

@@ -1,0 +1,5 @@
+# SQLite, still 1 replica (the only replicaCount SQLite supports), but
+# with Redis wired up anyway - a valid combination even below the
+# replica count where Redis stops being required.
+redis:
+  url: "redis://redis:6379/0"

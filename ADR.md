@@ -1,10 +1,10 @@
 # ADR: AgentHive
 
-Status: v3, in use. Originally written 2026-09-12 in response to reading
-TencentDB Agent Memory's install doc and wanting the same "shared memory
-across agents" outcome without three of their tradeoffs: no LLM-intercepting
-proxy, no per-request token tax, and a hard approval gate before anything
-becomes shared memory. See "v1 - resolving the open questions" for what
+Status: v3, in use. Originally written 2026-09-12 to lay out a "shared
+memory across agents" design that avoids three tradeoffs common to
+proxy-based agent memory systems: no LLM-intercepting proxy, no per-request
+token tax, and a hard approval gate before anything becomes shared memory.
+See "v1 - resolving the open questions" for what
 changed from v0, "v2 - containerized for real, metrics, and closing the
 remaining gaps" for what changed next, and "v3 - the entire journey,
 mapped" at the bottom for what changed since.
@@ -14,7 +14,7 @@ mapped" at the bottom for what changed since.
 Three goals, in order of how load-bearing they are to the design:
 
 1. **Guardrails and structured context first.** Memory is scoped to a
-   `team / agent / task` graph, same shape as TencentDB's, and nothing an
+   `team / agent / task` graph, and nothing an
    agent writes becomes visible to other agents until an admin (or an
    explicit auto-approve policy) approves it. This is the part that matters
    even if the token story turns out to be a wash.
@@ -27,25 +27,23 @@ Three goals, in order of how load-bearing they are to the design:
    of every LLM request. An agent's session makes at most two extra HTTP
    calls: one at the start (retrieve context for this team/agent/task) and
    one at the end (log what happened, into the pending queue unless an
-   auto-approve rule applies). Compare to TencentDB's design, where every
-   single turn passes through their proxy's auth -> session-init ->
-   injection pipeline.
+   auto-approve rule applies). Compare to a proxy-injection design, where
+   every single turn passes through an auth -> session-init -> injection
+   pipeline before it ever reaches the model.
 
-## Why not build what TencentDB built
+## Why not build an LLM-request proxy
 
-Their proxy-injection model is the more powerful design on paper: it works
-across six different agent clients without each one needing custom
-integration code, and it enriches every turn automatically. I looked at it
-closely enough to write the previous post on it, and decided not to copy
-the mechanism, for three reasons:
+A proxy-injection model is the more powerful design on paper: it can work
+across many different agent clients without each one needing custom
+integration code, and it enriches every turn automatically. I considered
+that shape and decided not to build it, for three reasons:
 
-- **It's the least mature part of their system.** Their own docs list
-  session-ID handling as broken for two of six clients (Hermes, OpenClaw
-  need `x-task-id` just to avoid a form those clients can't render), and
-  Codex needs a manual Plan-mode workaround because its default mode
-  auto-executes the very tool call the picker depends on. Protocol
-  translation across Anthropic Messages / OpenAI Chat / OpenAI Responses is
-  real, ongoing surface area, not a solved problem.
+- **It's the hardest part to get right, and the least necessary.**
+  Different agent clients disagree on session identity, tool-call
+  rendering, and how eagerly they auto-execute a tool call versus wait for
+  a picker - so a proxy has to special-case each one. Protocol translation
+  across Anthropic Messages / OpenAI Chat / OpenAI Responses is real,
+  ongoing surface area, not a solved problem.
 - **It hides the token cost.** Injection happens on every turn whether or
   not that turn needed the extra context. An explicit retrieve-at-start
   call means the token cost is visible and the agent (or the human running
@@ -70,8 +68,10 @@ the mechanism, for three reasons:
 - **Task** — optional. A memory written without a task still works; it
   just has no Task-level filter available later.
 - **MemoryNode** — the actual content. Has a tier (L0 raw / L1 extracted /
-  L2 scene / L3 persona, same ladder as TencentDB, though this still only
-  really uses L0/L1 — nothing here does the LLM-driven L1->L2->L3
+  L2 scene / L3 persona - a common tiering scheme for agent memory: raw
+  capture, extracted facts, summarized scenes, persona-level distillation
+  - though this still only really uses L0/L1 — nothing here does the
+  LLM-driven L1->L2->L3
   promotion, see Open Questions), a status (`pending` / `approved` /
   `rejected`), and a set of typed links to other node titles (unresolved
   links are allowed but never become traversable graph edges).
@@ -142,7 +142,7 @@ of each, now:
   once there's enough real usage to know what a good summary policy looks
   like.
 - **No LLM-request proxy.** Still a deliberate choice, not a missing
-  feature — see "Why not build what TencentDB built" above. Unchanged.
+  feature — see "Why not build an LLM-request proxy" above. Unchanged.
 
 Also added in v1, not originally called out as an open question but
 necessary for "point this at a real team" use: structured JSON request
@@ -266,10 +266,11 @@ all a documented, ordered process instead of README archaeology.
   been flushed yet. `main()` now converts SIGTERM into the same
   graceful-shutdown path as Ctrl+C and calls
   `tracing.shutdown_tracing()` on the way out.
-- **`ONBOARDING.md`.** A single ordered walkthrough (structured after
-  TencentDB Agent Memory's own INSTALL.md, minus the parts that don't
-  apply here since this isn't a multi-client proxy) for taking a team
-  from "nothing running" to "reviewing memory and watching traces" -
+- **`ONBOARDING.md`.** A single ordered walkthrough (install, create team,
+  add users, wire up an agent, review, auto-approve, watch it work, in
+  that order, rather than reference material split across files) for
+  taking a team from "nothing running" to "reviewing memory and watching
+  traces" -
   install, create team, add users, wire up an agent, review, auto-approve
   rules, then metrics/tracing. README.md stays the concept/reference
   doc; this is the "do this, in this order" doc a new team actually

@@ -117,3 +117,17 @@ redis-url
 {{- define "agenthive.scheme" -}}
 {{- if .Values.tls.enabled -}}https{{- else -}}http{{- end -}}
 {{- end -}}
+
+{{/*
+Full image reference: registry/repository, then either @digest (pinned) or
+:tag (defaulting to the chart's appVersion, since the image and chart are
+built from the same release - see .github/workflows/release.yml).
+*/}}
+{{- define "agenthive.image" -}}
+{{- $repo := printf "%s/%s" .Values.image.registry .Values.image.repository -}}
+{{- if .Values.image.digest -}}
+{{- printf "%s@%s" $repo .Values.image.digest -}}
+{{- else -}}
+{{- printf "%s:%s" $repo (.Values.image.tag | default .Chart.AppVersion) -}}
+{{- end -}}
+{{- end -}}

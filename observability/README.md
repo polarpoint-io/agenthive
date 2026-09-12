@@ -21,7 +21,7 @@ overclaim here:
   retrieval was scoped instead of dumped," not as "tokens saved on your
   OpenAI/Anthropic bill" - the second claim would need this service to
   see your actual model calls, which it deliberately doesn't (see
-  ADR.md's "Why not build what TencentDB built").
+  ADR.md's "Why not build an LLM-request proxy").
 - **The retrieval cache reduces graph-traversal work and DB load, not
   model calls.** AgentHive doesn't sit in front of inference, so it has
   no calls to a model to cache or reduce. What the cache demonstrably

@@ -1,0 +1,79 @@
+name: release
+
+# Semantic release, the same shape the rest of the estate uses: conventional
+# commits on main decide the version, semantic-release-helm3 writes it into
+# Chart.yaml and pushes the packaged chart to GHCR, and the resulting
+# v<version> tag is what builds the image.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  # semantic-release has no way to depend on another workflow, so the chart
+  # validation runs here too. Releasing a chart that does not render is worse
+  # than releasing nothing.
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: azure/setup-helm@v5
+        with:
+          version: v3.16.3
+
+      - name: Install kubeconform
+        run: |
+          curl -fsSL https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz \
+            | sudo tar xz -C /usr/local/bin kubeconform
+
+      - name: Lint, render every scenario, check names
+        run: make check
+
+  release:
+    needs: [validate]
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main'
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # semantic-release reads the whole tag history to work out the last
+          # release; a shallow clone makes every run look like the first.
+          fetch-depth: 0
+          persist-credentials: false
+          token: ${{ secrets.POL_GH_TOKEN }}
+
+      - uses: azure/setup-helm@v5
+        with:
+          version: v3.16.3
+
+      # semantic-release-helm3 shells out to `helm push`, so the registry has
+      # to be logged in before the plugin runs.
+      - name: Log in to GHCR
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" \
+            | helm registry login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: Semantic Release
+        uses: cycjimmy/semantic-release-action@v4
+        with:
+          extra_plugins: "semantic-release-helm3 @semantic-release/exec @semantic-release/changelog @semantic-release/git"
+        env:
+          # A PAT rather than GITHUB_TOKEN on purpose: pushes made with
+          # GITHUB_TOKEN do not trigger workflows, so the v<version> tag would
+          # land and the image would never build.
+          GH_TOKEN: ${{ secrets.POL_GH_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.POL_GH_TOKEN }}

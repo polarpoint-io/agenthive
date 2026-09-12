@@ -1,0 +1,117 @@
+name: chart
+
+on:
+  push:
+    branches: [main]
+    paths: ["helm/**", ".github/workflows/chart.yml"]
+  pull_request:
+    paths: ["helm/**", ".github/workflows/chart.yml"]
+  workflow_dispatch:
+
+concurrency:
+  group: chart-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CHART: helm/agenthive
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: azure/setup-helm@v5
+        with:
+          version: v3.16.3
+
+      - name: helm lint
+        run: helm lint "$CHART" --strict
+
+      - name: chart-testing (lint)
+        uses: helm/chart-testing-action@v2
+
+      - name: ct lint
+        run: |
+          ct lint --charts "$CHART" \
+                  --validate-maintainers=false \
+                  --check-version-increment=false
+
+  render:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: azure/setup-helm@v5
+        with:
+          version: v3.16.3
+
+      - name: Install kubeconform
+        run: |
+          curl -fsSL https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz \
+            | sudo tar xz -C /usr/local/bin kubeconform
+          kubeconform -v
+
+      # Every scenario the chart claims to support is rendered and validated,
+      # so a template that only works on defaults cannot merge.
+      - name: Render and validate every scenario
+        run: |
+          set -euo pipefail
+          fail=0
+          for f in "$CHART"/ci/*-values.yaml "$CHART"/values-postgres-example.yaml; do
+            name="$(basename "$f")"
+            for kube in 1.29.0 1.31.0; do
+              printf '%-34s k8s %-8s ' "$name" "$kube"
+              if helm template ci-test "$CHART" -f "$f" \
+                   | kubeconform -strict -summary -ignore-missing-schemas \
+                                 -kubernetes-version "$kube" -; then
+                :
+              else
+                fail=1
+              fi
+            done
+          done
+          exit "$fail"
+
+      - name: Reject values the chart must refuse
+        run: |
+          set -uo pipefail
+          expect_failure() {
+            if helm template bad "$CHART" $1 >/dev/null 2>&1; then
+              echo "FAIL: expected '$1' to be rejected"
+              exit 1
+            fi
+            echo "OK: rejected $1"
+          }
+          expect_failure "--set replicaCount=3"
+          expect_failure "--set database.type=postgres"
+          expect_failure "--set autoscaling.enabled=true"
+          expect_failure "--set tls.enabled=true"
+          expect_failure "--set ingress.enabled=true --set ingress.tls.enabled=true"
+
+      - name: Render scenario files together, not just one at a time
+        run: |
+          set -euo pipefail
+          helm template combo "$CHART" \
+            -f "$CHART/values-postgres-example.yaml" \
+            -f "$CHART/ci/native-tls-values.yaml" \
+            -f "$CHART/ci/tracing-values.yaml" \
+            | kubeconform -strict -summary -ignore-missing-schemas -kubernetes-version 1.31.0 -
+
+      - name: Check documented values match values.yaml
+        run: |
+          set -euo pipefail
+          missing=0
+          # Every top-level key must appear in the chart README.
+          for key in $(helm show values "$CHART" | grep -E '^[a-zA-Z]' | cut -d: -f1 | sort -u); do
+            if ! grep -q "\`$key\." "$CHART/README.md" && ! grep -q "\`$key\`" "$CHART/README.md"; then
+              echo "undocumented top-level value: $key"
+              missing=1
+            fi
+          done
+          exit "$missing"

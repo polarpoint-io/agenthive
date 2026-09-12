@@ -1,0 +1,55 @@
+<svg width="2400" height="960" viewBox="0 0 2400 960" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0d1113"/><stop offset="1" stop-color="#0a0e0f"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="24%" cy="46%" r="55%">
+      <stop offset="0" stop-color="#e8a53d" stop-opacity=".14"/>
+      <stop offset="1" stop-color="#e8a53d" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="rim" x1="0" y1="0" x2="0.7" y2="1">
+      <stop offset="0" stop-color="#f3c56b"/>
+      <stop offset=".45" stop-color="#e8a53d"/>
+      <stop offset=".8" stop-color="#8a5a1d"/>
+      <stop offset="1" stop-color="#4d3110"/>
+    </linearGradient>
+    <radialGradient id="knob" cx="35%" cy="30%" r="75%">
+      <stop offset="0" stop-color="#f3c56b"/><stop offset="1" stop-color="#8a5a1d"/>
+    </radialGradient>
+    <radialGradient id="cell" cx="34%" cy="26%" r="90%">
+      <stop offset="0" stop-color="#1c1712"/><stop offset="1" stop-color="#090a0a"/>
+    </radialGradient>
+    <linearGradient id="edge" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#f3c56b"/><stop offset="1" stop-color="#8a5a1d"/>
+    </linearGradient>
+    <clipPath id="cellClip"><path d="M 854.0,480.0 L 707.0,734.6 L 413.0,734.6 L 266.0,480.0 L 413.0,225.4 L 707.0,225.4 Z"/></clipPath>
+  </defs>
+
+  <rect width="2400" height="960" fill="url(#bg)"/>
+  <rect width="2400" height="960" fill="url(#glow)"/>
+
+  <!-- ============================ the mark ============================ -->
+  <g>
+    <path d="M 111.4,370.9 L 52.2,473.5 L -66.2,473.5 L -125.4,370.9 L -66.2,268.3 L 52.2,268.3 Z" fill="none" stroke="#2a2420" stroke-width="2.5" opacity="0.51"/><path d="M 111.4,589.1 L 52.2,691.7 L -66.2,691.7 L -125.4,589.1 L -66.2,486.5 L 52.2,486.5 Z" fill="none" stroke="#2a2420" stroke-width="2.5" opacity="0.55"/><path d="M 300.4,43.5 L 241.2,146.1 L 122.8,146.1 L 63.6,43.5 L 122.8,-59.0 L 241.2,-59.0 Z" fill="none" stroke="#2a2420" stroke-width="2.5" opacity="0.67"/><path d="M 300.4,261.8 L 241.2,364.3 L 122.8,364.3 L 63.6,261.8 L 122.8,159.2 L 241.2,159.2 Z" fill="none" stroke="#2a2420" stroke-width="2.5" opacity="0.51"/><path d="M 300.4,480.0 L 241.2,582.6 L 122.8,582.6 L 63.6,480.0 L 122.8,377.4 L 241.2,377.4 Z" fill="none" stroke="#2a2420" stroke-width="2.5" opacity="0.53"/><path d="M 300.4,698.2 L 241.2,800.8 L 122.8,800.8 L 63.6,698.2 L 122.8,595.7 L 241.2,595.7 Z" fill="none" stroke="#2a2420" stroke-width="2.5" opacity="0.56"/><path d="M 300.4,916.5 L 241.2,1019.0 L 122.8,1019.0 L 63.6,916.5 L 122.8,813.9 L 241.2,813.9 Z" fill="none" stroke="#2a2420" stroke-width="2.5" opacity="0.41"/><path d="M 489.4,-65.6 L 430.2,37.0 L 311.8,37.0 L 252.6,-65.6 L 311.8,-168.2 L 430.2,-168.2 Z" fill="none" stroke="#2a2420" stroke-width="2.5" opacity="0.53"/><path d="M 489.4,152.6 L 430.2,255.2 L 311.8,255.2 L 252.6,152.6 L 311.8,50.1 L 430.2,50.1 Z" fill="none" stroke="#2a2420" stroke-width="2.5" opacity="0.57"/><path d="M 489.4,807.4 L 430.2,909.9 L 311.8,909.9 L 252.6,807.4 L 311.8,704.8 L 430.2,704.8 Z" fill="none" stroke="#2a2420" stroke-width="2.5" opacity="0.63"/><path d="M 489.4,1025.6 L 430.2,1128.2 L 311.8,1128.2 L 252.6,1025.6 L 311.8,923.0 L 430.2,923.0 Z" fill="none" stroke="#2a2420" stroke-width="2.5" opacity="0.38"/><path d="M 678.4,43.5 L 619.2,146.1 L 500.8,146.1 L 441.6,43.5 L 500.8,-59.0 L 619.2,-59.0 Z" fill="none" stroke="#2a2420" stroke-width="2.5" opacity="0.46"/><path d="M 678.4,916.5 L 619.2,1019.0 L 500.8,1019.0 L 441.6,916.5 L 500.8,813.9 L 619.2,813.9 Z" fill="none" stroke="#2a2420" stroke-width="2.5" opacity="0.38"/><path d="M 867.4,-65.6 L 808.2,37.0 L 689.8,37.0 L 630.6,-65.6 L 689.8,-168.2 L 808.2,-168.2 Z" fill="none" stroke="#2a2420" stroke-width="2.5" opacity="0.63"/><path d="M 867.4,152.6 L 808.2,255.2 L 689.8,255.2 L 630.6,152.6 L 689.8,50.1 L 808.2,50.1 Z" fill="none" stroke="#2a2420" stroke-width="2.5" opacity="0.59"/><path d="M 867.4,807.4 L 808.2,909.9 L 689.8,909.9 L 630.6,807.4 L 689.8,704.8 L 808.2,704.8 Z" fill="none" stroke="#2a2420" stroke-width="2.5" opacity="0.36"/><path d="M 867.4,1025.6 L 808.2,1128.2 L 689.8,1128.2 L 630.6,1025.6 L 689.8,923.0 L 808.2,923.0 Z" fill="none" stroke="#2a2420" stroke-width="2.5" opacity="0.69"/><path d="M 1056.4,43.5 L 997.2,146.1 L 878.8,146.1 L 819.6,43.5 L 878.8,-59.0 L 997.2,-59.0 Z" fill="none" stroke="#2a2420" stroke-width="2.5" opacity="0.69"/><path d="M 1056.4,261.8 L 997.2,364.3 L 878.8,364.3 L 819.6,261.8 L 878.8,159.2 L 997.2,159.2 Z" fill="none" stroke="#2a2420" stroke-width="2.5" opacity="0.58"/><path d="M 1056.4,480.0 L 997.2,582.6 L 878.8,582.6 L 819.6,480.0 L 878.8,377.4 L 997.2,377.4 Z" fill="none" stroke="#2a2420" stroke-width="2.5" opacity="0.57"/><path d="M 1056.4,698.2 L 997.2,800.8 L 878.8,800.8 L 819.6,698.2 L 878.8,595.7 L 997.2,595.7 Z" fill="none" stroke="#2a2420" stroke-width="2.5" opacity="0.41"/><path d="M 1056.4,916.5 L 997.2,1019.0 L 878.8,1019.0 L 819.6,916.5 L 878.8,813.9 L 997.2,813.9 Z" fill="none" stroke="#2a2420" stroke-width="2.5" opacity="0.36"/><path d="M 1245.4,370.9 L 1186.2,473.5 L 1067.8,473.5 L 1008.6,370.9 L 1067.8,268.3 L 1186.2,268.3 Z" fill="none" stroke="#2a2420" stroke-width="2.5" opacity="0.53"/><path d="M 1245.4,589.1 L 1186.2,691.7 L 1067.8,691.7 L 1008.6,589.1 L 1067.8,486.5 L 1186.2,486.5 Z" fill="none" stroke="#2a2420" stroke-width="2.5" opacity="0.37"/>
+    <path d="M 854.0,480.0 L 707.0,734.6 L 413.0,734.6 L 266.0,480.0 L 413.0,225.4 L 707.0,225.4 Z" fill="url(#cell)" stroke="url(#rim)" stroke-width="15.0"/>
+    <path d="M 864.5,480.0 L 712.2,743.7 L 407.8,743.7 L 255.5,480.0 L 407.7,216.3 L 712.2,216.3 Z" fill="none" stroke="#f3c56b" stroke-width="2" opacity=".35"/>
+    <g clip-path="url(#cellClip)">
+      <line x1="560.0" y1="480.0" x2="560.0" y2="376.6" stroke="url(#edge)" stroke-width="3" opacity=".8"/><line x1="560.0" y1="480.0" x2="645.0" y2="412.2" stroke="url(#edge)" stroke-width="3" opacity=".8"/><line x1="560.0" y1="480.0" x2="644.9" y2="499.4" stroke="url(#edge)" stroke-width="3" opacity=".8"/><line x1="560.0" y1="480.0" x2="617.0" y2="598.3" stroke="url(#edge)" stroke-width="3" opacity=".8"/><line x1="560.0" y1="480.0" x2="504.1" y2="596.2" stroke="url(#edge)" stroke-width="3" opacity=".8"/><line x1="560.0" y1="480.0" x2="394.3" y2="517.8" stroke="url(#edge)" stroke-width="3" opacity=".8"/><line x1="560.0" y1="480.0" x2="452.9" y2="394.6" stroke="url(#edge)" stroke-width="3" opacity=".8"/><line x1="560.0" y1="376.6" x2="645.0" y2="412.2" stroke="url(#edge)" stroke-width="3" opacity=".8"/><line x1="644.9" y1="499.4" x2="617.0" y2="598.3" stroke="url(#edge)" stroke-width="3" opacity=".8"/><line x1="617.0" y1="598.3" x2="504.1" y2="596.2" stroke="url(#edge)" stroke-width="3" opacity=".8"/><circle cx="560.0" cy="376.6" r="16.0" fill="#8a5a1d" opacity=".95"/><circle cx="560.0" cy="376.6" r="7.2" fill="#f3c56b" opacity=".9"/><circle cx="645.0" cy="412.2" r="15.2" fill="#8a5a1d" opacity=".95"/><circle cx="645.0" cy="412.2" r="6.8" fill="#f3c56b" opacity=".9"/><circle cx="644.9" cy="499.4" r="14.5" fill="#8a5a1d" opacity=".95"/><circle cx="644.9" cy="499.4" r="6.5" fill="#f3c56b" opacity=".9"/><circle cx="617.0" cy="598.3" r="12.6" fill="#8a5a1d" opacity=".95"/><circle cx="617.0" cy="598.3" r="5.7" fill="#f3c56b" opacity=".9"/><circle cx="504.1" cy="596.2" r="12.1" fill="#8a5a1d" opacity=".95"/><circle cx="504.1" cy="596.2" r="5.5" fill="#f3c56b" opacity=".9"/><circle cx="394.3" cy="517.8" r="12.4" fill="#8a5a1d" opacity=".95"/><circle cx="394.3" cy="517.8" r="5.6" fill="#f3c56b" opacity=".9"/><circle cx="452.9" cy="394.6" r="11.4" fill="#8a5a1d" opacity=".95"/><circle cx="452.9" cy="394.6" r="5.1" fill="#f3c56b" opacity=".9"/><circle cx="560.0" cy="480.0" r="22.0" fill="url(#knob)" opacity=".95"/><circle cx="560.0" cy="480.0" r="9.9" fill="#f3c56b" opacity=".9"/>
+    </g>
+  </g>
+
+  <!-- ============================ wordmark ============================ -->
+  <text x="1030" y="446" font-family="Consolas, 'Courier New', monospace" font-weight="700"
+        font-size="128" letter-spacing="6" fill="#ffffff">AGENTHIVE</text>
+  <rect x="1030" y="486" width="1180" height="5" fill="#c98a2e"/>
+  <text x="1030" y="558" font-family="Consolas, 'Courier New', monospace" font-weight="500"
+        font-size="42" letter-spacing="1" fill="#c98a2e">Shared, reviewed memory for a team of coding agents</text>
+
+  <!-- ============================ footer ============================== -->
+  <g font-family="Consolas, 'Courier New', monospace" font-weight="400" font-size="36" fill="#8f9498">
+    <text x="86" y="820">&gt; team / agent / task graph, approval gate before anything is shared</text>
+    <text x="86" y="868">&gt; bounded retrieval by traversal, not a proxy on every LLM call</text>
+    <text x="86" y="916">&gt; SQLite or Postgres, metrics + OpenTelemetry tracing built in</text>
+    <text x="2314" y="916" text-anchor="end" fill="#c98a2e" opacity=".85">polarpoint-io/agenthive</text>
+  </g>
+</svg>

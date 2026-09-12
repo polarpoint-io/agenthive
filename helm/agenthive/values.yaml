@@ -6,9 +6,12 @@
 replicaCount: 1
 
 image:
-  repository: agenthive
-  # Defaults to .Chart.AppVersion if empty.
+  registry: ghcr.io
+  repository: polarpoint-io/agenthive
+  # Defaults to .Chart.AppVersion if empty - the version this chart itself
+  # was released at, since the image and chart are built from the same tag.
   tag: ""
+  digest: ""
   pullPolicy: IfNotPresent
 
 imagePullSecrets: []
