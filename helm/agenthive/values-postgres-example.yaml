@@ -1,0 +1,56 @@
+# Example override for a real deployment: Postgres (so replicaCount can
+# be >1), Redis (so the rate limiter and retrieval cache are shared
+# across those replicas), and an Ingress with TLS via cert-manager.
+#
+#   helm install agenthive helm/agenthive -f helm/agenthive/values-postgres-example.yaml \
+#     --set database.postgres.url="postgresql://user:pass@your-postgres:5432/agenthive" \
+#     --set redis.url="redis://your-redis:6379/0"
+#
+# (Passing secrets via --set is fine for a quick trial; for anything real
+# use database.postgres.existingSecret / redis.existingSecret instead -
+# see README.md.)
+
+replicaCount: 3
+
+database:
+  type: postgres
+  postgres:
+    # Placeholder so `helm template`/`helm lint` succeed standalone -
+    # override with --set (a quick trial) or, better, existingSecret
+    # (see README.md) for anything real.
+    url: "postgresql://agenthive:CHANGE-ME@postgres:5432/agenthive"
+
+redis:
+  url: "redis://redis:6379/0"
+
+autoscaling:
+  enabled: true
+  minReplicas: 3
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 70
+
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+  host: agenthive.example.com
+  tls:
+    enabled: true
+    secretName: agenthive-tls
+
+metrics:
+  serviceMonitor:
+    enabled: true
+
+resources:
+  requests:
+    cpu: 250m
+    memory: 256Mi
+  limits:
+    cpu: "1"
+    memory: 512Mi
+
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 2

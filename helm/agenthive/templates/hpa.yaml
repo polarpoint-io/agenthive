@@ -1,0 +1,25 @@
+{{- if .Values.autoscaling.enabled }}
+{{- if ne .Values.database.type "postgres" }}
+{{- fail "autoscaling.enabled=true requires database.type=postgres (SQLite supports one replica only)." }}
+{{- end }}
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ include "agenthive.fullname" . }}
+  labels:
+    {{- include "agenthive.labels" . | nindent 4 }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ include "agenthive.fullname" . }}
+  minReplicas: {{ .Values.autoscaling.minReplicas }}
+  maxReplicas: {{ .Values.autoscaling.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.autoscaling.targetCPUUtilizationPercentage }}
+{{- end }}

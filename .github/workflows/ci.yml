@@ -1,0 +1,81 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test-sqlite:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -r requirements.txt
+      - run: pytest -v
+
+  test-postgres:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: agenthive
+          POSTGRES_PASSWORD: agenthive
+          POSTGRES_DB: agenthive
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -r requirements.txt
+      - name: Run end-to-end suite against Postgres
+        env:
+          DATABASE_URL: postgresql://agenthive:agenthive@localhost:5432/agenthive
+        run: pytest -v tests/test_end_to_end.py tests/test_auth.py tests/test_autoapprove.py tests/test_metrics_and_cache.py
+
+  test-redis:
+    runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -r requirements.txt
+      - name: Run the Redis-backed rate-limiter/cache suite
+        env:
+          REDIS_URL_FOR_TESTS: redis://localhost:6379/0
+        run: pytest -v tests/test_redis_backends.py
+
+  helm-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+        with:
+          version: "v3.15.0"
+      - run: helm lint helm/agenthive
+      - run: helm template agenthive helm/agenthive > /dev/null
+      - run: helm template agenthive helm/agenthive -f helm/agenthive/values-postgres-example.yaml > /dev/null
+      - run: >
+          helm template agenthive helm/agenthive
+          --set tracing.otlpEndpoint=http://jaeger-collector.observability:4318
+          --set tracing.console=true > /dev/null

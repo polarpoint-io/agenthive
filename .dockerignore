@@ -1,5 +1,8 @@
 __pycache__/
 *.pyc
 *.db
-.env
+.git/
+.github/
+tests/
 .pytest_cache/
+*.md

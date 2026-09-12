@@ -1,0 +1,30 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "agenthive.fullname" . }}-config
+  labels:
+    {{- include "agenthive.labels" . | nindent 4 }}
+data:
+  AGENTHIVE_HOST: "0.0.0.0"
+  AGENTHIVE_PORT: {{ .Values.service.port | quote }}
+  {{- if eq .Values.database.type "sqlite" }}
+  AGENTHIVE_DB_PATH: "/data/agenthive.db"
+  {{- end }}
+  AGENTHIVE_RATE_LIMIT_ENABLED: {{ .Values.rateLimit.enabled | quote }}
+  AGENTHIVE_RATE_LIMIT_PER_MINUTE: {{ .Values.rateLimit.perMinute | quote }}
+  AGENTHIVE_RATE_LIMIT_WINDOW_SECONDS: {{ .Values.rateLimit.windowSeconds | quote }}
+  AGENTHIVE_CACHE_ENABLED: {{ .Values.cache.enabled | quote }}
+  AGENTHIVE_CACHE_TTL_SECONDS: {{ .Values.cache.ttlSeconds | quote }}
+  AGENTHIVE_LOG_LEVEL: {{ .Values.logging.level | quote }}
+  AGENTHIVE_LOG_JSON: {{ .Values.logging.json | quote }}
+  AGENTHIVE_METRICS_ENABLED: {{ .Values.metrics.enabled | quote }}
+  {{- if .Values.tls.enabled }}
+  AGENTHIVE_TLS_CERT_FILE: "/etc/agenthive/tls/tls.crt"
+  AGENTHIVE_TLS_KEY_FILE: "/etc/agenthive/tls/tls.key"
+  {{- end }}
+  {{- if .Values.tracing.otlpEndpoint }}
+  OTEL_EXPORTER_OTLP_ENDPOINT: {{ .Values.tracing.otlpEndpoint | quote }}
+  {{- end }}
+  {{- if .Values.tracing.console }}
+  AGENTHIVE_TRACING_CONSOLE: "true"
+  {{- end }}

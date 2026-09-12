@@ -1,0 +1,146 @@
+{
+  "__inputs": [
+    {
+      "name": "DS_PROMETHEUS",
+      "label": "Prometheus",
+      "description": "The Prometheus data source scraping AgentHive's /metrics",
+      "type": "datasource",
+      "pluginId": "prometheus"
+    }
+  ],
+  "title": "AgentHive - shared memory impact",
+  "description": "Token reduction, cache reuse across teammates, and graph growth over time. See observability/README.md for what each panel proves and why.",
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": true,
+  "timezone": "browser",
+  "time": { "from": "now-7d", "to": "now" },
+  "refresh": "1m",
+  "tags": ["agenthive"],
+  "panels": [
+    {
+      "id": 1,
+      "title": "Tokens avoided (cumulative)",
+      "type": "stat",
+      "gridPos": { "h": 6, "w": 8, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        { "expr": "agenthive_tokens_avoided_total", "legendFormat": "tokens avoided" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "description": "Running total of (full-team tokens - what was actually returned) across every retrieval since the process started. The headline 'this is why it's worth reviewing memory' number."
+    },
+    {
+      "id": 2,
+      "title": "Tokens served vs. tokens avoided",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 16, "x": 8, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        { "expr": "rate(agenthive_tokens_served_total[15m])", "legendFormat": "served" },
+        { "expr": "rate(agenthive_tokens_avoided_total[15m])", "legendFormat": "avoided" }
+      ],
+      "description": "If the gap between 'served' and 'avoided' widens over time, bounded retrieval is scaling better than a full-context dump would as the graph grows."
+    },
+    {
+      "id": 3,
+      "title": "Average retrieval reduction %",
+      "type": "stat",
+      "gridPos": { "h": 6, "w": 8, "x": 0, "y": 6 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        {
+          "expr": "sum(rate(agenthive_retrieval_reduction_pct_sum[1h])) / sum(rate(agenthive_retrieval_reduction_pct_count[1h]))",
+          "legendFormat": "avg reduction %"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "percent", "max": 100, "min": 0 }, "overrides": [] }
+    },
+    {
+      "id": 4,
+      "title": "Cache hit rate",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        {
+          "expr": "sum(rate(agenthive_cache_hits_total[15m])) / clamp_min(sum(rate(agenthive_cache_hits_total[15m])) + sum(rate(agenthive_cache_misses_total[15m])), 1)",
+          "legendFormat": "hit rate"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "percentunit", "max": 1, "min": 0 }, "overrides": [] },
+      "description": "A hit means the graph traversal ran once and served N agents, not N traversals."
+    },
+    {
+      "id": 5,
+      "title": "Cross-teammate cache hits (proof of shared reuse)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        { "expr": "rate(agenthive_cross_user_cache_hits_total[15m])", "legendFormat": "cross-user hits/s" },
+        { "expr": "rate(agenthive_cache_hits_total[15m])", "legendFormat": "all hits/s" }
+      ],
+      "description": "A cross-user hit is a DIFFERENT teammate's session being served context someone else's session already pulled - direct evidence the graph is acting as shared memory, not N private copies."
+    },
+    {
+      "id": 6,
+      "title": "Memory nodes by status",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 20 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        { "expr": "agenthive_memory_nodes", "legendFormat": "{{status}}" }
+      ],
+      "description": "Graph growth over time, split pending/approved/rejected. A healthy team's 'approved' line should climb faster than 'pending' piles up."
+    },
+    {
+      "id": 7,
+      "title": "Auto-approved vs. manually reviewed writes",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 20 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        { "expr": "rate(agenthive_memory_writes_total{status=\"auto_approved\"}[1h])", "legendFormat": "auto-approved" },
+        { "expr": "rate(agenthive_memory_reviews_total{decision=\"approved\"}[1h])", "legendFormat": "manually approved" },
+        { "expr": "rate(agenthive_memory_reviews_total{decision=\"rejected\"}[1h])", "legendFormat": "rejected" }
+      ],
+      "description": "Rising auto-approved share over time is auto-approve rules doing their job on routine memory, without loosening the gate on everything else."
+    },
+    {
+      "id": 8,
+      "title": "Active users / teams",
+      "type": "stat",
+      "gridPos": { "h": 6, "w": 8, "x": 16, "y": 6 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        { "expr": "agenthive_active_users", "legendFormat": "users" },
+        { "expr": "agenthive_teams", "legendFormat": "teams" }
+      ]
+    },
+    {
+      "id": 9,
+      "title": "HTTP request rate by route",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 28 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        { "expr": "sum by (route) (rate(agenthive_http_requests_total[5m]))", "legendFormat": "{{route}}" }
+      ]
+    },
+    {
+      "id": 10,
+      "title": "p95 request latency by route",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 28 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le, route) (rate(agenthive_http_request_duration_seconds_bucket[5m])))",
+          "legendFormat": "{{route}}"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] }
+    }
+  ]
+}

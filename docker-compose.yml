@@ -1,0 +1,86 @@
+# Default: SQLite, single container, a named volume for the database file.
+#
+#   docker compose up -d
+#
+# Add Postgres (needed once more than one instance writes concurrently -
+# see ADR.md):
+#
+#   docker compose --profile postgres up -d
+#   (then uncomment DATABASE_URL on the app service below, or export it
+#    before running compose so the app service picks it up)
+#
+# Add Redis (shares the rate limiter and retrieval cache - required once
+# you run more than one instance, optional but harmless with just one):
+#
+#   docker compose --profile redis up -d
+#   (then uncomment REDIS_URL on the app service below)
+#
+# Add Jaeger (maps the write -> review -> retrieve journey as traces you
+# can browse - see ONBOARDING.md and observability/README.md):
+#
+#   docker compose --profile jaeger up -d
+#   (then uncomment OTEL_EXPORTER_OTLP_ENDPOINT on the app service below)
+#   open http://localhost:16686
+
+services:
+  app:
+    build: .
+    ports:
+      - "8790:8790"
+    environment:
+      AGENTHIVE_DB_PATH: /data/agenthive.db
+      # Uncomment when using the postgres profile:
+      # DATABASE_URL: postgresql://agenthive:agenthive@postgres:5432/agenthive
+      # Uncomment when using the redis profile:
+      # REDIS_URL: redis://redis:6379/0
+      AGENTHIVE_LOG_JSON: "true"
+      AGENTHIVE_RATE_LIMIT_PER_MINUTE: "120"
+      AGENTHIVE_METRICS_ENABLED: "true"
+      # Uncomment when using the jaeger profile (or point at any other
+      # OTLP/HTTP-compatible backend - Tempo, Honeycomb, etc.):
+      # OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
+      # Zero-infrastructure alternative to the above - prints each
+      # finished span as JSON to stdout instead:
+      # AGENTHIVE_TRACING_CONSOLE: "true"
+      # Native TLS - usually left off in favor of a reverse proxy in front;
+      # mount a cert/key and uncomment to enable it directly instead:
+      # AGENTHIVE_TLS_CERT_FILE: /certs/tls.crt
+      # AGENTHIVE_TLS_KEY_FILE: /certs/tls.key
+    volumes:
+      - agenthive_data:/data
+      # - ./certs:/certs:ro
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16-alpine
+    profiles: ["postgres"]
+    environment:
+      POSTGRES_USER: agenthive
+      POSTGRES_PASSWORD: agenthive
+      POSTGRES_DB: agenthive
+    volumes:
+      - agenthive_pg_data:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    profiles: ["redis"]
+    restart: unless-stopped
+
+  # All-in-one Jaeger: OTLP/HTTP receiver on 4318, trace storage in
+  # memory (fine for a single host / demo - see Jaeger's own docs for a
+  # persistent backend), and the web UI on 16686. This is the "web UI"
+  # for "the entire journey mapped and visualised" - see ONBOARDING.md.
+  jaeger:
+    image: jaegertracing/all-in-one:1.60
+    profiles: ["jaeger"]
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    ports:
+      - "16686:16686" # web UI
+      - "4318:4318"   # OTLP/HTTP receiver
+    restart: unless-stopped
+
+volumes:
+  agenthive_data:
+  agenthive_pg_data:

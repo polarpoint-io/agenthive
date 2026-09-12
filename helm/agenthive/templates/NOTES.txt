@@ -1,0 +1,40 @@
+AgentHive is deploying with:
+  database: {{ .Values.database.type }}{{ if eq .Values.database.type "sqlite" }} (replicas pinned to 1){{ end }}
+  redis:    {{ if eq (include "agenthive.redisConfigured" .) "true" }}configured (shared cache + rate limit across replicas){{ else }}not configured (in-memory cache + rate limit, single-replica only){{ end }}
+  tls:      {{ if .Values.tls.enabled }}native (pod serves HTTPS directly){{ else }}off (terminate at your Ingress/proxy, or enable ingress.tls){{ end }}
+  metrics:  {{ if .Values.metrics.enabled }}enabled at /metrics{{ if .Values.metrics.serviceMonitor.enabled }}, ServiceMonitor created{{ else }}, scraped via pod annotations{{ end }}{{ else }}disabled{{ end }}
+
+{{- if and (eq .Values.database.type "sqlite") (not .Values.sqlite.persistence.enabled) }}
+
+WARNING: database.type=sqlite with sqlite.persistence.enabled=false uses
+an emptyDir - the memory graph is LOST on every pod restart. Fine for a
+quick trial, not for real use. Set sqlite.persistence.enabled=true (the
+default) or switch to Postgres.
+{{- end }}
+
+Get the service URL:
+
+{{- if .Values.ingress.enabled }}
+  http{{ if .Values.ingress.tls.enabled }}s{{ end }}://{{ .Values.ingress.host }}{{ .Values.ingress.path }}
+{{- else if eq .Values.service.type "LoadBalancer" }}
+  kubectl get svc -n {{ .Release.Namespace }} {{ include "agenthive.fullname" . }} -w
+  (watch for EXTERNAL-IP, then browse to port {{ .Values.service.port }})
+{{- else }}
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "agenthive.fullname" . }} {{ .Values.service.port }}:{{ .Values.service.port }}
+  open {{ include "agenthive.scheme" . }}://127.0.0.1:{{ .Values.service.port }}/ui
+{{- end }}
+
+Create your first team (from inside the cluster, or via port-forward):
+
+  curl -X POST {{ include "agenthive.scheme" . }}://127.0.0.1:{{ .Values.service.port }}/teams \
+    -H 'Content-Type: application/json' \
+    -d '{"name": "Platform Team"}'
+
+Save the returned admin token somewhere real - it is shown exactly once.
+
+Run the built-in smoke test:
+
+  helm test {{ .Release.Name }} -n {{ .Release.Namespace }}
+
+See helm/agenthive/README.md for upgrade paths (adding Postgres, adding
+Redis, enabling TLS) and helm/agenthive/values.yaml for every option.

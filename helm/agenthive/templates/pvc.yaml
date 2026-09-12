@@ -1,0 +1,17 @@
+{{- if and (eq .Values.database.type "sqlite") .Values.sqlite.persistence.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "agenthive.fullname" . }}-data
+  labels:
+    {{- include "agenthive.labels" . | nindent 4 }}
+spec:
+  accessModes:
+    {{- toYaml .Values.sqlite.persistence.accessModes | nindent 4 }}
+  resources:
+    requests:
+      storage: {{ .Values.sqlite.persistence.size }}
+  {{- if .Values.sqlite.persistence.storageClassName }}
+  storageClassName: {{ .Values.sqlite.persistence.storageClassName }}
+  {{- end }}
+{{- end }}

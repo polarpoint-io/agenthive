@@ -1,0 +1,27 @@
+# Core HTTP service + SQLite backend: no dependencies beyond the standard
+# library. Everything below is for optional pieces - the service still
+# runs with none of them installed, just without that piece.
+
+# Postgres backend (only imported if DATABASE_URL points at postgres://).
+psycopg2-binary>=2.9,<3
+
+# Shared rate limiting / retrieval cache across replicas (only imported
+# if REDIS_URL is set; falls back to in-memory, single-replica versions
+# of both otherwise).
+redis>=5.0,<6
+
+# Metrics (/metrics). Required - this is a small, pure-Python dependency
+# with no native extension, unlike the two above.
+prometheus_client>=0.20,<1
+
+# Distributed tracing (only active if OTEL_EXPORTER_OTLP_ENDPOINT or
+# AGENTHIVE_TRACING_CONSOLE is set - see tracing.py/config.py). All three
+# are lazily imported; the service runs fine with none of them installed,
+# tracing just stays off. The http/protobuf OTLP exporter is used
+# deliberately instead of the grpc one - no grpc dependency to build.
+opentelemetry-api>=1.24,<2
+opentelemetry-sdk>=1.24,<2
+opentelemetry-exporter-otlp-proto-http>=1.24,<2
+
+# Test suite.
+pytest>=7.4,<9

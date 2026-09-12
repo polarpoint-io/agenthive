@@ -1,0 +1,343 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AgentHive - Review</title>
+<style>
+  :root{
+    --bg:#0f1115; --panel:#161922; --panel-2:#1d2130; --border:#2a2f3d;
+    --text:#e7e9ee; --muted:#8b93a7; --accent:#5b8def; --good:#3fbf6f;
+    --bad:#e05a5a; --warn:#e0a95a;
+  }
+  @media (prefers-color-scheme: light){
+    :root{
+      --bg:#f5f6f8; --panel:#ffffff; --panel-2:#f0f1f4; --border:#dde1e8;
+      --text:#1a1d24; --muted:#5b6472; --accent:#3568d4; --good:#1f9d54;
+      --bad:#c8392f; --warn:#a86a12;
+    }
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+  .wrap{max-width:960px;margin:0 auto;padding:24px 16px 64px}
+  h1{font-size:20px;margin:0 0 4px}
+  .sub{color:var(--muted);margin:0 0 24px;font-size:13px}
+  .card{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:18px;margin-bottom:20px}
+  .card h2{font-size:14px;margin:0 0 14px;display:flex;align-items:center;gap:8px}
+  .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+  input,select,textarea{
+    background:var(--panel-2);border:1px solid var(--border);color:var(--text);
+    border-radius:6px;padding:8px 10px;font-size:13px;font-family:inherit
+  }
+  input,select{flex:1;min-width:120px}
+  textarea{width:100%;min-height:60px;resize:vertical}
+  button{
+    background:var(--accent);color:#fff;border:none;border-radius:6px;
+    padding:8px 14px;font-size:13px;cursor:pointer;white-space:nowrap
+  }
+  button.secondary{background:var(--panel-2);color:var(--text);border:1px solid var(--border)}
+  button.danger{background:var(--bad)}
+  button.good{background:var(--good)}
+  button:disabled{opacity:.5;cursor:not-allowed}
+  .pill{display:inline-block;font-size:11px;padding:2px 8px;border-radius:999px;background:var(--panel-2);color:var(--muted)}
+  .pill.admin{background:rgba(91,141,239,.15);color:var(--accent)}
+  .node{border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:10px;background:var(--panel-2)}
+  .node .meta{color:var(--muted);font-size:12px;margin-bottom:6px}
+  .node .body{white-space:pre-wrap;font-size:13px;margin:8px 0}
+  .empty{color:var(--muted);font-style:italic;padding:8px 0}
+  .status{font-size:12px;padding:8px 10px;border-radius:6px;margin-bottom:14px}
+  .status.err{background:rgba(224,90,90,.12);color:var(--bad)}
+  .status.ok{background:rgba(63,191,111,.12);color:var(--good)}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)}
+  th{color:var(--muted);font-weight:500}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+  @media (max-width:640px){.grid{grid-template-columns:1fr}}
+  code{background:var(--panel-2);padding:1px 5px;border-radius:4px;font-size:12px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>AgentHive</h1>
+  <p class="sub">Review pending memory, manage auto-approve rules and users. Your connection details are kept only in this browser.</p>
+
+  <div id="status"></div>
+
+  <div class="card">
+    <h2>Connection</h2>
+    <div class="row">
+      <input id="baseUrl" placeholder="Base URL, e.g. http://127.0.0.1:8790">
+      <input id="teamId" placeholder="Team ID">
+      <input id="apiKey" placeholder="Your personal API token (ah-...)" type="password">
+      <button onclick="connect()">Connect</button>
+      <button class="secondary" onclick="disconnect()">Forget</button>
+    </div>
+    <div id="whoami" class="sub" style="margin-top:10px"></div>
+  </div>
+
+  <div id="app" style="display:none">
+    <div class="card">
+      <h2>Pending memory <span class="pill" id="pendingCount">0</span></h2>
+      <div id="pendingList" class="empty">Nothing pending.</div>
+    </div>
+
+    <div class="card">
+      <h2>Auto-approve rules <span class="pill admin">admin</span></h2>
+      <div class="row">
+        <input id="ruleTag" placeholder="match tag (e.g. postgres)">
+        <span class="sub">or</span>
+        <input id="ruleAgent" placeholder="match agent id">
+        <button onclick="createRule()">Add rule</button>
+      </div>
+      <div id="rulesList" class="empty" style="margin-top:12px">No rules yet.</div>
+    </div>
+
+    <div class="card">
+      <h2>Users <span class="pill admin">admin</span></h2>
+      <div class="row">
+        <input id="newUserName" placeholder="name">
+        <select id="newUserRole">
+          <option value="member">member</option>
+          <option value="admin">admin</option>
+        </select>
+        <button onclick="createUser()">Create user</button>
+      </div>
+      <div id="newTokenBox" style="display:none;margin-top:10px" class="status ok"></div>
+      <div id="usersList" class="empty" style="margin-top:12px">No users yet.</div>
+    </div>
+
+    <div class="card">
+      <h2>Metrics <span class="pill admin">admin</span></h2>
+      <div id="metricsSummary" class="empty">No data yet.</div>
+      <div id="topReusedNodes" style="margin-top:12px"></div>
+      <p class="sub" style="margin-top:12px">Cross-team trends (tokens avoided, cache hit rate, graph growth over time) live in Grafana - see <code>observability/README.md</code>. This panel is this team's current snapshot only. For "where did one specific call's time actually go," see tracing (<code>ONBOARDING.md</code>'s "Watch it work") - browse traces in Jaeger once <code>OTEL_EXPORTER_OTLP_ENDPOINT</code> is set.</p>
+    </div>
+
+    <div class="card">
+      <h2>Try a retrieval</h2>
+      <div class="row">
+        <input id="anchor" placeholder="anchor title">
+        <input id="hops" placeholder="hops" value="2" style="max-width:80px">
+        <input id="hubCutoff" placeholder="hub cutoff" value="15" style="max-width:100px">
+        <button onclick="tryRetrieve()">Retrieve</button>
+      </div>
+      <div id="retrieveResult" style="margin-top:12px"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+let conn = null;
+
+function loadConn(){
+  try {
+    const raw = localStorage.getItem('tms_conn');
+    return raw ? JSON.parse(raw) : null;
+  } catch(e){ return null; }
+}
+function saveConn(c){
+  try { localStorage.setItem('tms_conn', JSON.stringify(c)); } catch(e){}
+}
+function clearConn(){
+  try { localStorage.removeItem('tms_conn'); } catch(e){}
+}
+
+function showStatus(msg, kind){
+  const el = document.getElementById('status');
+  el.className = 'status ' + (kind || '');
+  el.textContent = msg;
+  if (kind === 'ok') setTimeout(() => { if (el.textContent === msg) el.textContent=''; el.className=''; }, 4000);
+}
+
+async function api(path, opts){
+  opts = opts || {};
+  const headers = Object.assign({'Content-Type':'application/json'}, opts.headers || {});
+  if (conn && conn.apiKey) headers['X-API-Key'] = conn.apiKey;
+  const res = await fetch(conn.baseUrl + path, Object.assign({}, opts, {headers}));
+  let data = {};
+  try { data = await res.json(); } catch(e){}
+  if (!res.ok) throw new Error(data.error || ('HTTP ' + res.status));
+  return data;
+}
+
+function connect(){
+  const baseUrl = document.getElementById('baseUrl').value.trim().replace(/\/$/, '');
+  const teamId = document.getElementById('teamId').value.trim();
+  const apiKey = document.getElementById('apiKey').value.trim();
+  if (!baseUrl || !teamId || !apiKey){
+    showStatus('Fill in base URL, team ID and API token.', 'err');
+    return;
+  }
+  conn = {baseUrl, teamId, apiKey};
+  saveConn(conn);
+  refreshAll();
+}
+
+function disconnect(){
+  conn = null;
+  clearConn();
+  document.getElementById('app').style.display = 'none';
+  document.getElementById('whoami').textContent = '';
+  showStatus('Forgot this connection.', 'ok');
+}
+
+async function refreshAll(){
+  document.getElementById('app').style.display = 'block';
+  document.getElementById('baseUrl').value = conn.baseUrl;
+  document.getElementById('teamId').value = conn.teamId;
+  document.getElementById('apiKey').value = conn.apiKey;
+  try {
+    await Promise.all([loadPending(), loadRules(), loadUsers(), loadMetrics()]);
+    showStatus('Connected.', 'ok');
+  } catch(e){
+    showStatus('Connect error: ' + e.message, 'err');
+  }
+}
+
+async function loadPending(){
+  const data = await api('/teams/' + conn.teamId + '/memory/pending');
+  const nodes = data.pending || [];
+  document.getElementById('pendingCount').textContent = nodes.length;
+  const box = document.getElementById('pendingList');
+  if (!nodes.length){ box.className = 'empty'; box.textContent = 'Nothing pending.'; return; }
+  box.className = '';
+  box.innerHTML = nodes.map(n => `
+    <div class="node">
+      <div class="meta">${escapeHtml(n.title)} &middot; tier ${n.tier} &middot; ${n.created_at} &middot; tags: ${(n.tags||[]).join(', ') || 'none'}</div>
+      <div class="body">${escapeHtml(n.body)}</div>
+      <div class="row">
+        <button class="good" onclick="approveNode('${n.id}')">Approve</button>
+        <button class="danger" onclick="rejectNode('${n.id}')">Reject</button>
+      </div>
+    </div>
+  `).join('');
+}
+
+async function approveNode(id){
+  try { await api('/teams/' + conn.teamId + '/memory/' + id + '/approve', {method:'POST', body:'{}'}); await loadPending(); loadMetrics(); showStatus('Approved.', 'ok'); }
+  catch(e){ showStatus(e.message, 'err'); }
+}
+async function rejectNode(id){
+  const reason = prompt('Reason for rejecting (optional):') || '';
+  try { await api('/teams/' + conn.teamId + '/memory/' + id + '/reject', {method:'POST', body: JSON.stringify({reason})}); await loadPending(); showStatus('Rejected.', 'ok'); }
+  catch(e){ showStatus(e.message, 'err'); }
+}
+
+async function loadRules(){
+  try {
+    const data = await api('/teams/' + conn.teamId + '/auto-approve-rules');
+    const rules = (data.rules || []).filter(r => r.active);
+    const box = document.getElementById('rulesList');
+    if (!rules.length){ box.className='empty'; box.textContent='No rules yet.'; return; }
+    box.className = '';
+    box.innerHTML = '<table><tr><th>Match</th><th>Created by</th><th></th></tr>' + rules.map(r => `
+      <tr>
+        <td>${r.match_tag ? 'tag: ' + escapeHtml(r.match_tag) : 'agent: ' + escapeHtml(r.match_agent_id)}</td>
+        <td>${escapeHtml(r.created_by)}</td>
+        <td><button class="secondary" onclick="deleteRule('${r.id}')">Remove</button></td>
+      </tr>`).join('') + '</table>';
+  } catch(e){ /* non-admin users can't see rules; ignore */ }
+}
+async function createRule(){
+  const tag = document.getElementById('ruleTag').value.trim();
+  const agent = document.getElementById('ruleAgent').value.trim();
+  if (!tag && !agent){ showStatus('Enter a tag or an agent id.', 'err'); return; }
+  try {
+    await api('/teams/' + conn.teamId + '/auto-approve-rules', {method:'POST', body: JSON.stringify({match_tag: tag || null, match_agent_id: agent || null})});
+    document.getElementById('ruleTag').value=''; document.getElementById('ruleAgent').value='';
+    await loadRules();
+    showStatus('Rule added.', 'ok');
+  } catch(e){ showStatus(e.message, 'err'); }
+}
+async function deleteRule(id){
+  try { await api('/teams/' + conn.teamId + '/auto-approve-rules/' + id, {method:'DELETE'}); await loadRules(); showStatus('Rule removed.', 'ok'); }
+  catch(e){ showStatus(e.message, 'err'); }
+}
+
+async function loadUsers(){
+  try {
+    const data = await api('/teams/' + conn.teamId + '/users');
+    const users = data.users || [];
+    const box = document.getElementById('usersList');
+    if (!users.length){ box.className='empty'; box.textContent='No users yet.'; return; }
+    box.className = '';
+    box.innerHTML = '<table><tr><th>Name</th><th>Role</th><th>Status</th><th></th></tr>' + users.map(u => `
+      <tr>
+        <td>${escapeHtml(u.name)}</td>
+        <td><span class="pill ${u.role === 'admin' ? 'admin' : ''}">${u.role}</span></td>
+        <td>${u.revoked_at ? 'revoked' : 'active'}</td>
+        <td>${u.revoked_at ? '' : `<button class="secondary" onclick="revokeUser('${u.id}')">Revoke</button>`}</td>
+      </tr>`).join('') + '</table>';
+  } catch(e){ /* non-admin users can't see this; ignore */ }
+}
+async function createUser(){
+  const name = document.getElementById('newUserName').value.trim();
+  const role = document.getElementById('newUserRole').value;
+  if (!name){ showStatus('Enter a name.', 'err'); return; }
+  try {
+    const u = await api('/teams/' + conn.teamId + '/users', {method:'POST', body: JSON.stringify({name, role})});
+    document.getElementById('newUserName').value = '';
+    const box = document.getElementById('newTokenBox');
+    box.style.display = 'block';
+    box.innerHTML = `Token for <b>${escapeHtml(name)}</b> (copy now, shown once): <code>${u.token}</code>`;
+    await loadUsers();
+  } catch(e){ showStatus(e.message, 'err'); }
+}
+async function revokeUser(id){
+  if (!confirm('Revoke this user\\'s access?')) return;
+  try { await api('/teams/' + conn.teamId + '/users/' + id + '/revoke', {method:'POST', body:'{}'}); await loadUsers(); showStatus('Revoked.', 'ok'); }
+  catch(e){ showStatus(e.message, 'err'); }
+}
+
+async function loadMetrics(){
+  try {
+    const s = await api('/teams/' + conn.teamId + '/metrics/summary');
+    const counts = s.node_counts || {};
+    const box = document.getElementById('metricsSummary');
+    box.className = '';
+    box.innerHTML = `
+      <div class="grid">
+        <div>Approved nodes: <b>${counts.approved || 0}</b></div>
+        <div>Pending review: <b>${counts.pending || 0}</b></div>
+        <div>Rejected: <b>${counts.rejected || 0}</b></div>
+        <div>Total retrievals: <b>${s.total_retrievals}</b></div>
+        <div>Active users: <b>${s.active_users}</b></div>
+        <div>Active auto-approve rules: <b>${s.active_auto_approve_rules}</b></div>
+      </div>`;
+    const top = document.getElementById('topReusedNodes');
+    if (!s.top_reused_nodes || !s.top_reused_nodes.length){
+      top.className = 'empty';
+      top.textContent = 'No retrievals logged yet - reuse data appears once teammates start calling retrieve_context.';
+      return;
+    }
+    top.className = '';
+    top.innerHTML = '<div class="sub" style="margin-bottom:6px">Most-reused memory (by distinct teammates served):</div><table><tr><th>Title</th><th>Distinct users</th><th>Retrievals</th></tr>' +
+      s.top_reused_nodes.map(n => `<tr><td>${escapeHtml(n.title)}</td><td>${n.distinct_users}</td><td>${n.access_count}</td></tr>`).join('') + '</table>';
+  } catch(e){ /* non-admin users can't see this; ignore */ }
+}
+
+async function tryRetrieve(){
+  const anchor = document.getElementById('anchor').value.trim();
+  const hops = document.getElementById('hops').value.trim() || '2';
+  const hubCutoff = document.getElementById('hubCutoff').value.trim() || '15';
+  if (!anchor){ showStatus('Enter an anchor title.', 'err'); return; }
+  try {
+    const data = await api('/teams/' + conn.teamId + '/memory/retrieve?anchor=' + encodeURIComponent(anchor) + '&hops=' + hops + '&hub_cutoff=' + hubCutoff);
+    const box = document.getElementById('retrieveResult');
+    box.innerHTML = `<div class="sub">${data.neighborhood_count} node(s), ~${data.approx_tokens} tokens (${data.reduction_pct}% smaller than the full team graph)</div>` +
+      data.neighborhood.map(n => `<div class="node"><div class="meta">${escapeHtml(n.title)} &middot; ${n.tier}</div><div class="body">${escapeHtml(n.body)}</div></div>`).join('');
+    loadMetrics();
+  } catch(e){ showStatus(e.message, 'err'); }
+}
+
+function escapeHtml(s){
+  return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+(function init(){
+  const saved = loadConn();
+  if (saved){ conn = saved; refreshAll().catch(()=>{}); }
+})();
+</script>
+</body>
+</html>

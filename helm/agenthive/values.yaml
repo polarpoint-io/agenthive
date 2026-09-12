@@ -1,0 +1,156 @@
+# Default values for agenthive.
+# See README.md in this directory for a walkthrough of the common
+# configurations (SQLite single-replica, Postgres multi-replica, with or
+# without Redis and TLS).
+
+replicaCount: 1
+
+image:
+  repository: agenthive
+  # Defaults to .Chart.AppVersion if empty.
+  tag: ""
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+podAnnotations: {}
+
+podSecurityContext:
+  runAsNonRoot: true
+  fsGroup: 1000
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: false
+  capabilities:
+    drop: ["ALL"]
+
+service:
+  type: ClusterIP
+  port: 8790
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  # Example for cert-manager:
+  #   cert-manager.io/cluster-issuer: letsencrypt-prod
+  host: agenthive.example.com
+  path: /
+  pathType: Prefix
+  tls:
+    enabled: false
+    secretName: ""
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 256Mi
+
+# Only meaningful with database.type=postgres - SQLite is a single file,
+# so more than one replica means more than one pod writing to (or reading
+# a stale view of) the same file, which this chart deliberately refuses
+# to render (see templates/_helpers.tpl validation).
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 5
+  targetCPUUtilizationPercentage: 70
+
+# --- database ---
+database:
+  # "sqlite" (default - single replica, backed by a PVC) or "postgres"
+  # (any replica count, point at your own Postgres - this chart does not
+  # deploy one).
+  type: sqlite
+  postgres:
+    # Either set `url` directly, or point at an existing secret holding
+    # the full postgresql:// URL under `existingSecretKey`. If both
+    # `existingSecret` and `url` are set, `existingSecret` wins.
+    url: ""
+    existingSecret: ""
+    existingSecretKey: "database-url"
+
+sqlite:
+  persistence:
+    enabled: true
+    size: 1Gi
+    storageClassName: ""
+    accessModes: ["ReadWriteOnce"]
+
+# --- redis: shares the rate limiter and retrieval cache across replicas.
+# Optional with a single replica (both fall back to in-memory); becomes
+# a correctness-adjacent concern once you run more than one - see
+# ADR.md "v2" and DEPLOYMENT.md. This chart does not deploy Redis itself.
+redis:
+  url: ""
+  existingSecret: ""
+  existingSecretKey: "redis-url"
+
+# --- TLS served natively by the app (AGENTHIVE_TLS_CERT_FILE/KEY_FILE).
+# Most Kubernetes deployments terminate TLS at the Ingress instead
+# (ingress.tls above) and leave this off - enable it only when the
+# service must present TLS itself, e.g. with a service mesh sidecar
+# expecting HTTPS backends, or with no Ingress in front at all.
+tls:
+  enabled: false
+  # A Secret of type kubernetes.io/tls (keys: tls.crt, tls.key).
+  secretName: ""
+
+rateLimit:
+  enabled: true
+  perMinute: 120
+  windowSeconds: 60
+
+cache:
+  enabled: true
+  ttlSeconds: 300
+
+logging:
+  level: INFO
+  json: true
+
+metrics:
+  enabled: true
+  serviceMonitor:
+    # Requires the Prometheus Operator CRDs. If you scrape plainly
+    # instead, leave this off - podAnnotations already advertise
+    # prometheus.io/scrape for that path.
+    enabled: false
+    interval: 30s
+    labels: {}
+
+# --- distributed tracing (OpenTelemetry). Off by default - a fresh
+# install pays nothing for this. This chart does not deploy a tracing
+# backend itself (same pattern as redis/postgres above) - point
+# otlpEndpoint at Jaeger, Tempo, or anything else that speaks OTLP/HTTP.
+# See helm/agenthive/README.md's "Tracing" section and ONBOARDING.md.
+tracing:
+  otlpEndpoint: ""
+  # console: true prints each finished span as JSON to the pod's stdout -
+  # a zero-infrastructure way to confirm tracing is wired up (`kubectl
+  # logs`) before pointing otlpEndpoint at a real backend.
+  console: false
+
+# Extra environment variables / envFrom, passed straight through - use
+# this for anything not already modeled above.
+extraEnv: []
+extraEnvFrom: []
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+podDisruptionBudget:
+  enabled: false
+  minAvailable: 1
