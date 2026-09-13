@@ -66,7 +66,7 @@
   <div class="card">
     <h2>Connection</h2>
     <div class="row">
-      <input id="baseUrl" placeholder="Base URL, e.g. http://127.0.0.1:8790">
+      <input id="baseUrl" placeholder="Base URL, e.g. http://127.0.0.1:8790" onchange="checkAzureStatus()">
       <input id="teamId" placeholder="Team ID">
       <input id="apiKey" placeholder="Your personal API token (ah-...)" type="password">
       <button onclick="connect()">Connect</button>
@@ -356,20 +356,25 @@ function escapeHtml(s){
   return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
 
-// Azure AD sign-in (humans only - see ADR.md "Authentication"). The
-// review UI is always served by the same process that owns the Azure AD
-// config (tenant/client id/secret), so window.location.origin - not the
-// "Base URL" field above, which exists for pointing this page at a
-// *different* API host - is always the right target for these calls.
+// Azure AD sign-in (humans only - see ADR.md "Authentication"). This UI
+// may be served by the same process as the API (the default) or as its
+// own container pointed at a different API host (see ui/Dockerfile,
+// AGENTHIVE_UI_URL) - either way, the "Base URL" field above is the API
+// to talk to, falling back to this page's own origin when that field is
+// still empty (the same-origin, all-in-one case).
+function apiBaseForAzure(){
+  const typed = document.getElementById('baseUrl').value.trim().replace(/\/$/, '');
+  return typed || window.location.origin;
+}
 async function checkAzureStatus(){
   try {
-    const res = await fetch(window.location.origin + '/auth/azure/status');
+    const res = await fetch(apiBaseForAzure() + '/auth/azure/status');
     const data = await res.json();
     document.getElementById('azureRow').style.display = data.enabled ? 'flex' : 'none';
-  } catch(e){ /* leave the button hidden */ }
+  } catch(e){ document.getElementById('azureRow').style.display = 'none'; }
 }
 function signInWithAzure(){
-  window.location.href = window.location.origin + '/auth/azure/login';
+  window.location.href = apiBaseForAzure() + '/auth/azure/login';
 }
 
 // After a redirect back from /auth/azure/callback, everything needed is in
@@ -384,7 +389,7 @@ function handleAzureRedirect(){
 
   if (params.has('session')){
     conn = {
-      baseUrl: window.location.origin,
+      baseUrl: params.get('api') || window.location.origin,
       teamId: params.get('team') || '',
       apiKey: params.get('session'),
     };
