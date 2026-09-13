@@ -1,0 +1,6 @@
+# Only needed to run mcp_server.py (the local MCP stdio wrapper Cursor /
+# Claude Code spawn as a subprocess - see README.md's "Hooking up Cursor /
+# Claude Code via MCP"). Not a dependency of server.py or client.py, and
+# not installed in the container image - this runs on a teammate's own
+# machine, not on the deployed service.
+mcp>=1.2,<2

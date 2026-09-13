@@ -52,6 +52,14 @@ that shape and decided not to build it, for three reasons:
   a client calls explicitly. Explicit calls are also just easier to reason
   about when something goes wrong.
 
+`mcp_server.py` (see README.md's "Hooking up Cursor / Claude Code via
+MCP") doesn't change this: it's a thin local MCP stdio wrapper exposing
+the exact same two explicit calls as tools an IDE can discover, not a
+proxy that intercepts or injects anything. It holds no state, makes no
+decisions, and runs on the calling user's own machine using their own
+personal token - the member/admin split and the approval gate are still
+enforced entirely server-side, same as every other client of the API.
+
 ## Core entities
 
 - **Team** — owns everything. Memory never crosses a team boundary; this

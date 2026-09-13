@@ -125,6 +125,12 @@ curl -sX POST $AGENTHIVE_URL/teams/$TEAM_ID/agents \
 
 ## Step 5: Point your coding agent at it
 
+**Using Cursor or Claude Code?** Skip straight to `mcp_server.py` (see
+README.md's "Hooking up Cursor / Claude Code via MCP") - it wraps the same
+two calls below as native MCP tools, so there's no instruction block to
+write or keep in sync. The rest of this step is for any other agent, or
+a plain script.
+
 Add an instruction block to whatever your agent already reads at session
 start (`CLAUDE.md`, `.cursor/rules`, a system prompt) telling it to call
 the two functions in `client.py`:

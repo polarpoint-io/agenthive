@@ -155,6 +155,53 @@ client.log_session(
 This writes a node that starts `pending`, unless it matches an
 auto-approve rule.
 
+## Hooking up Cursor / Claude Code via MCP
+
+The instruction-block approach above works anywhere, but Cursor and Claude
+Code can also discover `retrieve_context` and `log_session` as native
+tools over [MCP](https://modelcontextprotocol.io) - no `CLAUDE.md` /
+`.cursor/rules` prose needed, the agent just sees them in its tool list.
+
+`mcp_server.py` is a thin local wrapper: it runs on your own machine (your
+IDE spawns it as a subprocess, same as any other MCP server), reads
+`AGENTHIVE_URL` / `AGENTHIVE_TOKEN` / `AGENTHIVE_TEAM_ID` from its
+environment, and passes every call straight through to `client.py` - it
+holds no state and makes no decisions of its own, so you still only get
+exactly what your token already lets you do (see ADR.md's "Authentication"
+section). It needs one extra package that the deployed service itself
+never installs:
+
+```bash
+pip install -r requirements-mcp.txt
+```
+
+Then point your IDE at it. Claude Code (`.mcp.json` in the repo root, or
+`claude mcp add`):
+
+```json
+{
+  "mcpServers": {
+    "agenthive": {
+      "command": "python3",
+      "args": ["/absolute/path/to/agenthive/mcp_server.py"],
+      "env": {
+        "AGENTHIVE_URL": "http://127.0.0.1:8790",
+        "AGENTHIVE_TOKEN": "<your personal token>",
+        "AGENTHIVE_TEAM_ID": "<team id>"
+      }
+    }
+  }
+}
+```
+
+Cursor (`.cursor/mcp.json`) uses the identical shape. Either way, use your
+own token from Step 3 above, not the admin's - the MCP server enforces
+nothing itself, so whatever your token can do (member or admin) is what
+it can do here too. Once it's picked up, tell the agent (in a
+`CLAUDE.md` / `.cursor/rules` line, or just once in conversation) to call
+`retrieve_context` before starting work and `log_session` once it's done -
+the tools existing doesn't make an agent call them unprompted.
+
 ## Reviewing pending memory
 
 Open `http://127.0.0.1:8790/ui` in a browser, enter the base URL, team
@@ -228,7 +275,7 @@ living forever like an agent's token.
 ## Testing
 
 ```bash
-pip install -r requirements.txt
+pip install -r requirements.txt -r requirements-mcp.txt
 pytest
 ```
 
@@ -242,7 +289,8 @@ which also `helm lint`s and `helm template`s the chart).
 `tests/test_retrieval_unit.py` proves the traversal algorithm in
 isolation. `test_end_to_end.py`, `test_auth.py`, `test_autoapprove.py`,
 `test_rate_limit.py`, `test_metrics_and_cache.py`, `test_redis_backends.py`,
-`test_tls.py`, `test_tracing.py` and `test_oidc.py` prove the properties
+`test_tls.py`, `test_tracing.py`, `test_oidc.py` and `test_mcp_server.py`
+prove the properties
 that matter for the design: the approval gate actually gates, team
 isolation actually isolates, roles are enforced, revoked/rotated tokens
 actually stop working, auto-approve rules actually match, the rate
@@ -253,9 +301,12 @@ reuse, the server actually serves HTTPS when TLS is configured, the write
 shared trace id across a propagated call (using the zero-infrastructure
 console exporter; real OTLP export to Jaeger was verified manually
 during development - see `ADR.md`'s "Reliability and observability"
-section), and Azure AD sign-in actually mints a working session only for
+section), Azure AD sign-in actually mints a working session only for
 a linked user, against a real locally-generated RSA keypair and JWKS
-endpoint rather than a mocked signature check.
+endpoint rather than a mocked signature check, and `mcp_server.py`
+actually round-trips a write through approval to retrieval when driven by
+a real `mcp.ClientSession` over real stdio, not a mocked transport
+(skipped automatically if `requirements-mcp.txt` isn't installed).
 
 ## Metrics: does this actually reduce token usage and get reused?
 
@@ -353,6 +404,7 @@ flagged as gaps at some point and are closed now - see `ADR.md`.
 - `retrieval.py` - the traversal algorithm, scoped to team + approved-only
 - `server.py` - the HTTP API (stdlib `http.server`) + structured logging + health checks + TLS + tracing
 - `client.py` - what an agent session (or an admin script) actually calls; propagates trace context
+- `mcp_server.py`, `requirements-mcp.txt` - local MCP stdio wrapper exposing `retrieve_context`/`log_session` as native tools for Cursor/Claude Code (see "Hooking up Cursor / Claude Code via MCP" above)
 - `ui/index.html` - the review UI, served at `GET /ui` (approve/reject, users, auto-approve rules, metrics)
 - `tests/` - pytest suite (unit + end-to-end against a real running server, incl. Redis, TLS, and tracing)
 - `Dockerfile`, `docker-compose.yml` - container packaging (SQLite, Postgres, Redis, and/or Jaeger profiles)
