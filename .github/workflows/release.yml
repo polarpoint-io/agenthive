@@ -47,6 +47,13 @@ jobs:
       issues: write
       pull-requests: write
       id-token: write
+      # semantic-release-helm3 pushes the packaged chart to GHCR as an OCI
+      # artifact (see the "Semantic Release" step below) - without this the
+      # job's GITHUB_TOKEN can log in to ghcr.io but the actual `helm push`
+      # gets a 403, and semantic-release exits non-zero even though the
+      # commit/tag it already created land fine (its earlier "prepare" step
+      # already pushed those before this one fails).
+      packages: write
     steps:
       - uses: actions/checkout@v7
         with:
