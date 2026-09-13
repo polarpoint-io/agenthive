@@ -1,3 +1,10 @@
+# [1.3.0](https://github.com/polarpoint-io/agenthive/compare/v1.2.0...v1.3.0) (2026-09-13)
+
+
+### Features
+
+* **server:** support hosting the review UI in a separate container ([0f49b66](https://github.com/polarpoint-io/agenthive/commit/0f49b662819fb6d515b647a342cedf7bb1d1d339))
+
 # [1.2.0](https://github.com/polarpoint-io/agenthive/compare/v1.1.2...v1.2.0) (2026-09-13)
 
 
