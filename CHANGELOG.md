@@ -1,3 +1,10 @@
+## [1.6.1](https://github.com/polarpoint-io/agenthive/compare/v1.6.0...v1.6.1) (2026-09-13)
+
+
+### Bug Fixes
+
+* **release:** let semantic-release-helm3 bump appVersion too ([6d8abd2](https://github.com/polarpoint-io/agenthive/commit/6d8abd202d8d4551b6a1fa5b165b98e858377389))
+
 # [1.6.0](https://github.com/polarpoint-io/agenthive/compare/v1.5.0...v1.6.0) (2026-09-13)
 
 

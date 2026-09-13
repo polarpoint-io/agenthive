@@ -9,8 +9,8 @@ type: application
 # edit by hand. This is also the tag of the image this chart defaults to,
 # because it's built from the same release (see .github/workflows/release.yml
 # and images.yml).
-version: 1.6.0
-appVersion: "1.0.0"
+version: 1.6.1
+appVersion: "1.6.1"
 
 kubeVersion: ">=1.25.0-0"
 
