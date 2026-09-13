@@ -10,7 +10,11 @@ Unauthenticated:
   GET  /healthz                                         liveness probe
   GET  /readyz                                          readiness probe (checks DB)
   GET  /metrics                                         Prometheus exposition format
-  GET  /ui                                              the review UI (static page)
+  GET  /ui                                              the review UI (static page) -
+                                                         served here by default; can
+                                                         instead be run as its own
+                                                         container (see ui/Dockerfile,
+                                                         AGENTHIVE_UI_URL in config.py)
 
   GET  /auth/azure/status                               {enabled} - whether Azure AD
                                                           login is configured (see config.py)
@@ -124,6 +128,29 @@ def log_request(**fields):
     log.handle(record)
 
 
+def _ui_base() -> str:
+    """Where the review UI is hosted. Defaults to this server's own /ui
+    for backward compatibility with an all-in-one deployment; set
+    AGENTHIVE_UI_URL once the UI is split into its own container (see
+    ui/Dockerfile) so Azure AD redirects land on the right host instead
+    of a path this server no longer serves."""
+    return CONFIG.ui_url or "/ui"
+
+
+def _api_public_base() -> str:
+    """Best-effort externally-reachable base URL for this API, derived
+    from AGENTHIVE_AZURE_REDIRECT_URI (which is, by definition, already
+    the correct external URL for this server - it has to exactly match
+    the Azure AD App Registration). Only used to tell a cross-origin UI
+    which API it just authenticated against; empty if Azure AD isn't
+    configured, which is fine since nothing reads it then."""
+    suffix = "/auth/azure/callback"
+    uri = CONFIG.azure_ad_redirect_uri
+    if uri.endswith(suffix):
+        return uri[: -len(suffix)]
+    return ""
+
+
 ROUTES = [
     (re.compile(r"^/teams$"), "POST", "create_team", None),
     (re.compile(r"^/healthz$"), "GET", "healthz", None),
@@ -167,12 +194,24 @@ class Handler(BaseHTTPRequestHandler):
 
     # ---- plumbing ----
 
+    def _cors_headers(self):
+        """Access-Control-Allow-* headers, sent on every response (not just
+        preflight) so a UI hosted on a different origin than this API (see
+        config.py's ui_url/cors_origin) can read the response. Harmless for
+        the default all-in-one deployment - a same-origin browser request
+        ignores these headers entirely."""
+        if not CONFIG.cors_origin:
+            return
+        self.send_header("Access-Control-Allow-Origin", CONFIG.cors_origin)
+        self.send_header("Vary", "Origin")
+
     def _send(self, status: int, payload: dict, extra_headers: dict = None):
         body = json.dumps(payload).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
         self.send_header("X-Request-Id", getattr(self, "_request_id", ""))
+        self._cors_headers()
         for k, v in (extra_headers or {}).items():
             self.send_header(k, v)
         self.end_headers()
@@ -183,6 +222,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
+        self._cors_headers()
         self.end_headers()
         self.wfile.write(body)
 
@@ -190,6 +230,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
+        self._cors_headers()
         self.end_headers()
         self.wfile.write(body)
 
@@ -197,6 +238,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(302)
         self.send_header("Location", location)
         self.send_header("Content-Length", "0")
+        self._cors_headers()
         self.end_headers()
 
     def _body(self) -> dict:
@@ -336,6 +378,19 @@ class Handler(BaseHTTPRequestHandler):
     def do_DELETE(self):
         self._dispatch("DELETE")
 
+    def do_OPTIONS(self):
+        """CORS preflight. Every route here only ever needs GET/POST/DELETE
+        plus the two headers a cross-origin UI would send (Content-Type for
+        JSON bodies, X-API-Key for auth), so this can be one fixed response
+        rather than checking Access-Control-Request-Method per route."""
+        self.send_response(204)
+        self._cors_headers()
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type, X-API-Key")
+        self.send_header("Access-Control-Max-Age", "86400")
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
     # ---- unauthenticated routes ----
 
     def h_create_team(self, params, query):
@@ -394,22 +449,30 @@ class Handler(BaseHTTPRequestHandler):
             self._send(404, {"error": "Azure AD login is not configured"})
             return 404
 
+        # All redirects below target the review UI, which may be this
+        # server's own /ui (default) or a separately-hosted UI container
+        # (AGENTHIVE_UI_URL - see _ui_base()). The final success redirect
+        # additionally tells a cross-origin UI which API host it just
+        # authenticated against (_api_public_base()), since it can no
+        # longer assume that's window.location.origin.
+        ui_base = _ui_base()
+
         error = (query.get("error_description") or query.get("error") or [None])[0]
         if error:
-            self._send_redirect("/ui#azure_error=" + urlquote(error))
+            self._send_redirect(ui_base + "#azure_error=" + urlquote(error))
             return 302
 
         state = (query.get("state") or [None])[0]
         code = (query.get("code") or [None])[0]
         if not state or not code:
-            self._send_redirect("/ui#azure_error=" + urlquote("missing code/state"))
+            self._send_redirect(ui_base + "#azure_error=" + urlquote("missing code/state"))
             return 302
 
         with tracing.TRACER.start_as_current_span("oidc.callback") as span:
             verifier = STORE.consume_oidc_state(state)
             if not verifier:
                 self._send_redirect(
-                    "/ui#azure_error=" + urlquote("sign-in expired, please try again")
+                    ui_base + "#azure_error=" + urlquote("sign-in expired, please try again")
                 )
                 return 302
 
@@ -417,7 +480,7 @@ class Handler(BaseHTTPRequestHandler):
                 claims = oidc.exchange_code_for_claims(code, verifier)
             except oidc.OidcError as e:
                 span.record_exception(e)
-                self._send_redirect("/ui#azure_error=" + urlquote(str(e)))
+                self._send_redirect(ui_base + "#azure_error=" + urlquote(str(e)))
                 return 302
 
             azure_oid = claims["oid"]
@@ -429,7 +492,7 @@ class Handler(BaseHTTPRequestHandler):
             if not user:
                 span.set_attribute("agenthive.azure_link_needed", True)
                 self._send_redirect(
-                    "/ui#azure_link_needed=1"
+                    ui_base + "#azure_link_needed=1"
                     "&oid=" + urlquote(azure_oid) +
                     "&email=" + urlquote(email) +
                     "&name=" + urlquote(name)
@@ -440,9 +503,10 @@ class Handler(BaseHTTPRequestHandler):
             span.set_attribute("agenthive.user_id", user["id"])
 
         self._send_redirect(
-            "/ui#session=" + urlquote(token) +
+            ui_base + "#session=" + urlquote(token) +
             "&team=" + urlquote(user["team_id"]) +
-            "&name=" + urlquote(user["name"])
+            "&name=" + urlquote(user["name"]) +
+            "&api=" + urlquote(_api_public_base())
         )
         return 302
 

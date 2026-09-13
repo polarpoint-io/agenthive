@@ -165,6 +165,24 @@ class Config:
     # Azure AD periodically is normal and expected; an agent doing so is not.
     oidc_session_ttl_seconds: int = _int("AGENTHIVE_AZURE_SESSION_TTL_SECONDS", 3600)
 
+    # Where the review UI is hosted, if not served by this process itself
+    # (see ui/Dockerfile for running it as its own container). Empty means
+    # "this server's own /ui" - the default, all-in-one deployment. Only
+    # affects where Azure AD sign-in redirects land (see server.py's
+    # _ui_base()) - it doesn't disable this server's own /ui route, so both
+    # can be reachable at once if you want that during a migration.
+    ui_url: str = os.environ.get("AGENTHIVE_UI_URL", "")
+
+    # Access-Control-Allow-Origin value for browser requests, needed once
+    # the UI is served from a different origin than this API (see ui_url
+    # above). "*" (default) matches AgentHive's existing bearer-token auth
+    # model - X-API-Key isn't a cookie, so it's never sent automatically by
+    # a browser to an origin the user didn't ask it to call, unlike cookie
+    # auth where a wildcard origin would be a real CSRF risk. Set this to
+    # an explicit origin (e.g. https://agenthive-ui.yourcompany.com) if you
+    # want to lock it down anyway.
+    cors_origin: str = os.environ.get("AGENTHIVE_CORS_ORIGIN", "*")
+
     @property
     def oidc_enabled(self) -> bool:
         return bool(
