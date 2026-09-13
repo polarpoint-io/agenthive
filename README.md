@@ -377,7 +377,7 @@ flagged as gaps at some point and are closed now - see `ADR.md`.
 - `.github/workflows/` - `ci.yml` (pytest against SQLite/Postgres/Redis), `chart.yml` (helm lint + render + validate), `images.yml` (build/push to GHCR), `release.yml` (semantic-release from conventional commits on `main`)
 - `Makefile`, `.releaserc.json`, `commitlint.config.js`, `package.json` - the same local build/release tooling used across polarpoint-io
 - `docs/diagrams/` - C4 Context/Container diagrams (PlantUML source + rendered SVG)
-- `static/hero.svg` - the banner at the top of this file (`hack/build_hero.py` regenerates it)
+- `static/hero.svg` - the banner at the top of this file, hand-authored in the same style as the org's other MCP-server repos (see e.g. polarpoint-io/holmesgpt-runbook-mcp's docs/hero.svg)
 - `observability/` - Grafana dashboard + the metrics/tracing reference
 - `ONBOARDING.md` - step-by-step walkthrough for getting a real team from zero to using this
 - `DEPLOYMENT.md` - Docker/Kubernetes/Postgres/Redis/TLS/tracing/systemd setup, env vars, known limitations

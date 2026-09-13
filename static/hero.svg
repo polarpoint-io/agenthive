@@ -1,55 +1,226 @@
-<svg width="2400" height="960" viewBox="0 0 2400 960" xmlns="http://www.w3.org/2000/svg">
+<svg viewBox="0 0 1280 640" xmlns="http://www.w3.org/2000/svg" font-family="ui-monospace, 'Cascadia Code', 'Fira Code', monospace">
   <defs>
     <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#0d1113"/><stop offset="1" stop-color="#0a0e0f"/>
+      <stop offset="0%" stop-color="#0d1117"/>
+      <stop offset="100%" stop-color="#0f1923"/>
     </linearGradient>
-    <radialGradient id="glow" cx="24%" cy="46%" r="55%">
-      <stop offset="0" stop-color="#e8a53d" stop-opacity=".14"/>
-      <stop offset="1" stop-color="#e8a53d" stop-opacity="0"/>
+    <radialGradient id="centreGlow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#3b82f6" stop-opacity="0.12"/>
+      <stop offset="100%" stop-color="#3b82f6" stop-opacity="0"/>
     </radialGradient>
-    <linearGradient id="rim" x1="0" y1="0" x2="0.7" y2="1">
-      <stop offset="0" stop-color="#f3c56b"/>
-      <stop offset=".45" stop-color="#e8a53d"/>
-      <stop offset=".8" stop-color="#8a5a1d"/>
-      <stop offset="1" stop-color="#4d3110"/>
+    <linearGradient id="cardGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#161b22"/>
+      <stop offset="100%" stop-color="#0d1117"/>
     </linearGradient>
-    <radialGradient id="knob" cx="35%" cy="30%" r="75%">
-      <stop offset="0" stop-color="#f3c56b"/><stop offset="1" stop-color="#8a5a1d"/>
-    </radialGradient>
-    <radialGradient id="cell" cx="34%" cy="26%" r="90%">
-      <stop offset="0" stop-color="#1c1712"/><stop offset="1" stop-color="#090a0a"/>
-    </radialGradient>
-    <linearGradient id="edge" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#f3c56b"/><stop offset="1" stop-color="#8a5a1d"/>
+    <linearGradient id="blueCard" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#1d3557"/>
+      <stop offset="100%" stop-color="#0f2238"/>
     </linearGradient>
-    <clipPath id="cellClip"><path d="M 854.0,480.0 L 707.0,734.6 L 413.0,734.6 L 266.0,480.0 L 413.0,225.4 L 707.0,225.4 Z"/></clipPath>
+    <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+      <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#ffffff" stroke-opacity="0.025" stroke-width="1"/>
+    </pattern>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#3b82f6" opacity="0.8"/>
+    </marker>
+    <marker id="arrow-green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#10b981" opacity="0.8"/>
+    </marker>
+    <filter id="shadow" x="-5%" y="-5%" width="110%" height="120%">
+      <feDropShadow dx="0" dy="4" stdDeviation="8" flood-color="#000000" flood-opacity="0.5"/>
+    </filter>
   </defs>
 
-  <rect width="2400" height="960" fill="url(#bg)"/>
-  <rect width="2400" height="960" fill="url(#glow)"/>
+  <!-- Background -->
+  <rect width="1280" height="640" fill="url(#bg)"/>
+  <rect width="1280" height="640" fill="url(#grid)"/>
+  <ellipse cx="640" cy="310" rx="320" ry="200" fill="url(#centreGlow)"/>
 
-  <!-- ============================ the mark ============================ -->
-  <g>
-    <path d="M 111.4,370.9 L 52.2,473.5 L -66.2,473.5 L -125.4,370.9 L -66.2,268.3 L 52.2,268.3 Z" fill="none" stroke="#2a2420" stroke-width="2.5" opacity="0.51"/><path d="M 111.4,589.1 L 52.2,691.7 L -66.2,691.7 L -125.4,589.1 L -66.2,486.5 L 52.2,486.5 Z" fill="none" stroke="#2a2420" stroke-width="2.5" opacity="0.55"/><path d="M 300.4,43.5 L 241.2,146.1 L 122.8,146.1 L 63.6,43.5 L 122.8,-59.0 L 241.2,-59.0 Z" fill="none" stroke="#2a2420" stroke-width="2.5" opacity="0.67"/><path d="M 300.4,261.8 L 241.2,364.3 L 122.8,364.3 L 63.6,261.8 L 122.8,159.2 L 241.2,159.2 Z" fill="none" stroke="#2a2420" stroke-width="2.5" opacity="0.51"/><path d="M 300.4,480.0 L 241.2,582.6 L 122.8,582.6 L 63.6,480.0 L 122.8,377.4 L 241.2,377.4 Z" fill="none" stroke="#2a2420" stroke-width="2.5" opacity="0.53"/><path d="M 300.4,698.2 L 241.2,800.8 L 122.8,800.8 L 63.6,698.2 L 122.8,595.7 L 241.2,595.7 Z" fill="none" stroke="#2a2420" stroke-width="2.5" opacity="0.56"/><path d="M 300.4,916.5 L 241.2,1019.0 L 122.8,1019.0 L 63.6,916.5 L 122.8,813.9 L 241.2,813.9 Z" fill="none" stroke="#2a2420" stroke-width="2.5" opacity="0.41"/><path d="M 489.4,-65.6 L 430.2,37.0 L 311.8,37.0 L 252.6,-65.6 L 311.8,-168.2 L 430.2,-168.2 Z" fill="none" stroke="#2a2420" stroke-width="2.5" opacity="0.53"/><path d="M 489.4,152.6 L 430.2,255.2 L 311.8,255.2 L 252.6,152.6 L 311.8,50.1 L 430.2,50.1 Z" fill="none" stroke="#2a2420" stroke-width="2.5" opacity="0.57"/><path d="M 489.4,807.4 L 430.2,909.9 L 311.8,909.9 L 252.6,807.4 L 311.8,704.8 L 430.2,704.8 Z" fill="none" stroke="#2a2420" stroke-width="2.5" opacity="0.63"/><path d="M 489.4,1025.6 L 430.2,1128.2 L 311.8,1128.2 L 252.6,1025.6 L 311.8,923.0 L 430.2,923.0 Z" fill="none" stroke="#2a2420" stroke-width="2.5" opacity="0.38"/><path d="M 678.4,43.5 L 619.2,146.1 L 500.8,146.1 L 441.6,43.5 L 500.8,-59.0 L 619.2,-59.0 Z" fill="none" stroke="#2a2420" stroke-width="2.5" opacity="0.46"/><path d="M 678.4,916.5 L 619.2,1019.0 L 500.8,1019.0 L 441.6,916.5 L 500.8,813.9 L 619.2,813.9 Z" fill="none" stroke="#2a2420" stroke-width="2.5" opacity="0.38"/><path d="M 867.4,-65.6 L 808.2,37.0 L 689.8,37.0 L 630.6,-65.6 L 689.8,-168.2 L 808.2,-168.2 Z" fill="none" stroke="#2a2420" stroke-width="2.5" opacity="0.63"/><path d="M 867.4,152.6 L 808.2,255.2 L 689.8,255.2 L 630.6,152.6 L 689.8,50.1 L 808.2,50.1 Z" fill="none" stroke="#2a2420" stroke-width="2.5" opacity="0.59"/><path d="M 867.4,807.4 L 808.2,909.9 L 689.8,909.9 L 630.6,807.4 L 689.8,704.8 L 808.2,704.8 Z" fill="none" stroke="#2a2420" stroke-width="2.5" opacity="0.36"/><path d="M 867.4,1025.6 L 808.2,1128.2 L 689.8,1128.2 L 630.6,1025.6 L 689.8,923.0 L 808.2,923.0 Z" fill="none" stroke="#2a2420" stroke-width="2.5" opacity="0.69"/><path d="M 1056.4,43.5 L 997.2,146.1 L 878.8,146.1 L 819.6,43.5 L 878.8,-59.0 L 997.2,-59.0 Z" fill="none" stroke="#2a2420" stroke-width="2.5" opacity="0.69"/><path d="M 1056.4,261.8 L 997.2,364.3 L 878.8,364.3 L 819.6,261.8 L 878.8,159.2 L 997.2,159.2 Z" fill="none" stroke="#2a2420" stroke-width="2.5" opacity="0.58"/><path d="M 1056.4,480.0 L 997.2,582.6 L 878.8,582.6 L 819.6,480.0 L 878.8,377.4 L 997.2,377.4 Z" fill="none" stroke="#2a2420" stroke-width="2.5" opacity="0.57"/><path d="M 1056.4,698.2 L 997.2,800.8 L 878.8,800.8 L 819.6,698.2 L 878.8,595.7 L 997.2,595.7 Z" fill="none" stroke="#2a2420" stroke-width="2.5" opacity="0.41"/><path d="M 1056.4,916.5 L 997.2,1019.0 L 878.8,1019.0 L 819.6,916.5 L 878.8,813.9 L 997.2,813.9 Z" fill="none" stroke="#2a2420" stroke-width="2.5" opacity="0.36"/><path d="M 1245.4,370.9 L 1186.2,473.5 L 1067.8,473.5 L 1008.6,370.9 L 1067.8,268.3 L 1186.2,268.3 Z" fill="none" stroke="#2a2420" stroke-width="2.5" opacity="0.53"/><path d="M 1245.4,589.1 L 1186.2,691.7 L 1067.8,691.7 L 1008.6,589.1 L 1067.8,486.5 L 1186.2,486.5 Z" fill="none" stroke="#2a2420" stroke-width="2.5" opacity="0.37"/>
-    <path d="M 854.0,480.0 L 707.0,734.6 L 413.0,734.6 L 266.0,480.0 L 413.0,225.4 L 707.0,225.4 Z" fill="url(#cell)" stroke="url(#rim)" stroke-width="15.0"/>
-    <path d="M 864.5,480.0 L 712.2,743.7 L 407.8,743.7 L 255.5,480.0 L 407.7,216.3 L 712.2,216.3 Z" fill="none" stroke="#f3c56b" stroke-width="2" opacity=".35"/>
-    <g clip-path="url(#cellClip)">
-      <line x1="560.0" y1="480.0" x2="560.0" y2="376.6" stroke="url(#edge)" stroke-width="3" opacity=".8"/><line x1="560.0" y1="480.0" x2="645.0" y2="412.2" stroke="url(#edge)" stroke-width="3" opacity=".8"/><line x1="560.0" y1="480.0" x2="644.9" y2="499.4" stroke="url(#edge)" stroke-width="3" opacity=".8"/><line x1="560.0" y1="480.0" x2="617.0" y2="598.3" stroke="url(#edge)" stroke-width="3" opacity=".8"/><line x1="560.0" y1="480.0" x2="504.1" y2="596.2" stroke="url(#edge)" stroke-width="3" opacity=".8"/><line x1="560.0" y1="480.0" x2="394.3" y2="517.8" stroke="url(#edge)" stroke-width="3" opacity=".8"/><line x1="560.0" y1="480.0" x2="452.9" y2="394.6" stroke="url(#edge)" stroke-width="3" opacity=".8"/><line x1="560.0" y1="376.6" x2="645.0" y2="412.2" stroke="url(#edge)" stroke-width="3" opacity=".8"/><line x1="644.9" y1="499.4" x2="617.0" y2="598.3" stroke="url(#edge)" stroke-width="3" opacity=".8"/><line x1="617.0" y1="598.3" x2="504.1" y2="596.2" stroke="url(#edge)" stroke-width="3" opacity=".8"/><circle cx="560.0" cy="376.6" r="16.0" fill="#8a5a1d" opacity=".95"/><circle cx="560.0" cy="376.6" r="7.2" fill="#f3c56b" opacity=".9"/><circle cx="645.0" cy="412.2" r="15.2" fill="#8a5a1d" opacity=".95"/><circle cx="645.0" cy="412.2" r="6.8" fill="#f3c56b" opacity=".9"/><circle cx="644.9" cy="499.4" r="14.5" fill="#8a5a1d" opacity=".95"/><circle cx="644.9" cy="499.4" r="6.5" fill="#f3c56b" opacity=".9"/><circle cx="617.0" cy="598.3" r="12.6" fill="#8a5a1d" opacity=".95"/><circle cx="617.0" cy="598.3" r="5.7" fill="#f3c56b" opacity=".9"/><circle cx="504.1" cy="596.2" r="12.1" fill="#8a5a1d" opacity=".95"/><circle cx="504.1" cy="596.2" r="5.5" fill="#f3c56b" opacity=".9"/><circle cx="394.3" cy="517.8" r="12.4" fill="#8a5a1d" opacity=".95"/><circle cx="394.3" cy="517.8" r="5.6" fill="#f3c56b" opacity=".9"/><circle cx="452.9" cy="394.6" r="11.4" fill="#8a5a1d" opacity=".95"/><circle cx="452.9" cy="394.6" r="5.1" fill="#f3c56b" opacity=".9"/><circle cx="560.0" cy="480.0" r="22.0" fill="url(#knob)" opacity=".95"/><circle cx="560.0" cy="480.0" r="9.9" fill="#f3c56b" opacity=".9"/>
-    </g>
+  <!-- ─── LEFT: agent session card ─────────────────────────────── -->
+  <g filter="url(#shadow)">
+    <rect x="32" y="188" width="204" height="256" rx="10" fill="url(#cardGrad)" stroke="#21262d" stroke-width="1.5"/>
+  </g>
+  <circle cx="134" cy="236" r="20" fill="#1f2937" stroke="#a78bfa" stroke-width="1.5"/>
+  <text x="134" y="242" text-anchor="middle" font-size="14" fill="#a78bfa">&gt;_</text>
+  <text x="134" y="273" text-anchor="middle" font-size="12" fill="#e6edf3">Root-cause found</text>
+  <text x="134" y="289" text-anchor="middle" font-size="10" fill="#8b949e">Postgres pool exhaustion</text>
+  <line x1="52" y1="304" x2="216" y2="304" stroke="#21262d" stroke-width="1"/>
+  <rect x="52" y="314" width="130" height="7" rx="3" fill="#21262d"/>
+  <rect x="52" y="328" width="100" height="7" rx="3" fill="#21262d"/>
+  <rect x="52" y="342" width="118" height="7" rx="3" fill="#21262d"/>
+  <rect x="52" y="356" width="88" height="7" rx="3" fill="#21262d"/>
+  <rect x="52" y="370" width="108" height="7" rx="3" fill="#1a1f27"/>
+  <rect x="52" y="384" width="76" height="7" rx="3" fill="#1a1f27"/>
+  <rect x="52" y="398" width="120" height="7" rx="3" fill="#1a1f27"/>
+  <text x="134" y="462" text-anchor="middle" font-size="10" fill="#6e7681" letter-spacing="0.8">AGENT SESSION</text>
+
+  <line x1="238" y1="316" x2="300" y2="316" stroke="#3b82f6" stroke-width="1.5" stroke-opacity="0.6" marker-end="url(#arrow)" stroke-dasharray="4 3"/>
+
+  <!-- ─── LEFT-CENTRE: any client ──────────────────────────────── -->
+  <g filter="url(#shadow)">
+    <rect x="300" y="248" width="148" height="136" rx="10" fill="url(#cardGrad)" stroke="#21262d" stroke-width="1.5"/>
+  </g>
+  <circle cx="374" cy="297" r="24" fill="#111827" stroke="#6366f1" stroke-width="1.5"/>
+  <circle cx="374" cy="297" r="9" fill="none" stroke="#a5b4fc" stroke-width="2"/>
+  <circle cx="374" cy="297" r="3" fill="#a5b4fc"/>
+  <text x="374" y="333" text-anchor="middle" font-size="12" fill="#e6edf3">Any client</text>
+  <text x="374" y="349" text-anchor="middle" font-size="9" fill="#8b949e">agenthive-mcp · client.py</text>
+  <text x="374" y="370" text-anchor="middle" font-size="8" fill="#4b5563">one personal token each</text>
+
+  <line x1="450" y1="316" x2="500" y2="316" stroke="#3b82f6" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="475" y="308" text-anchor="middle" font-size="9" fill="#3b82f6">HTTP</text>
+
+  <!-- ─── CENTRE: agenthive server card ────────────────────────── -->
+  <g filter="url(#shadow)">
+    <rect x="500" y="88" width="304" height="468" rx="12" fill="url(#blueCard)" stroke="#3b82f6" stroke-width="1.5" stroke-opacity="0.7"/>
+  </g>
+  <!-- Badge -->
+  <rect x="562" y="104" width="180" height="20" rx="10" fill="#1e40af" fill-opacity="0.6"/>
+  <text x="652" y="118" text-anchor="middle" font-size="9" fill="#93c5fd" letter-spacing="1">HTTP API · PORT 8790</text>
+  <!-- Title -->
+  <text x="652" y="154" text-anchor="middle" font-size="17" fill="#e6edf3" font-weight="bold">agenthive</text>
+  <text x="652" y="173" text-anchor="middle" font-size="10" fill="#60a5fa">polarpoint-io / agenthive</text>
+  <line x1="522" y1="188" x2="782" y2="188" stroke="#2d4a7a" stroke-width="1"/>
+
+  <!-- Endpoints -->
+  <rect x="520" y="198" width="264" height="38" rx="6" fill="#0d1f38" stroke="#1e3a5f" stroke-width="1"/>
+  <rect x="520" y="198" width="4" height="38" rx="2" fill="#3b82f6"/>
+  <text x="536" y="214" font-size="10" fill="#60a5fa" font-weight="bold">retrieve</text>
+  <text x="536" y="228" font-size="9" fill="#6e7681">Bounded traversal, approved-only</text>
+
+  <rect x="520" y="242" width="264" height="38" rx="6" fill="#0d1f38" stroke="#1e3a5f" stroke-width="1"/>
+  <rect x="520" y="242" width="4" height="38" rx="2" fill="#10b981"/>
+  <text x="536" y="258" font-size="10" fill="#6ee7b7" font-weight="bold">log</text>
+  <text x="536" y="272" font-size="9" fill="#6e7681">Writes a memory node · starts pending</text>
+
+  <rect x="520" y="286" width="264" height="38" rx="6" fill="#0d1f38" stroke="#1e3a5f" stroke-width="1"/>
+  <rect x="520" y="286" width="4" height="38" rx="2" fill="#f59e0b"/>
+  <text x="536" y="302" font-size="10" fill="#fcd34d" font-weight="bold">approve / reject</text>
+  <text x="536" y="316" font-size="9" fill="#6e7681">Admin-only, or an auto-approve rule</text>
+
+  <rect x="520" y="330" width="264" height="38" rx="6" fill="#0d1f38" stroke="#1e3a5f" stroke-width="1"/>
+  <rect x="520" y="330" width="4" height="38" rx="2" fill="#8b5cf6"/>
+  <text x="536" y="346" font-size="10" fill="#a78bfa" font-weight="bold">users / tokens</text>
+  <text x="536" y="360" font-size="9" fill="#6e7681">member/admin split, rotate, revoke</text>
+
+  <rect x="520" y="374" width="264" height="38" rx="6" fill="#0d1f38" stroke="#1e3a5f" stroke-width="1"/>
+  <rect x="520" y="374" width="4" height="38" rx="2" fill="#3b82f6"/>
+  <text x="536" y="390" font-size="10" fill="#60a5fa" font-weight="bold">metrics / tracing</text>
+  <text x="536" y="404" font-size="9" fill="#6e7681">tokens avoided, reuse, OTel spans</text>
+
+  <!-- Storage pills -->
+  <text x="652" y="430" text-anchor="middle" font-size="9" fill="#4b5563" letter-spacing="0.5">STORAGE</text>
+  <rect x="520" y="436" width="66" height="18" rx="9" fill="#1e1b4b"/>
+  <text x="553" y="448" text-anchor="middle" font-size="8" fill="#a5b4fc">SQLite</text>
+  <rect x="592" y="436" width="72" height="18" rx="9" fill="#14532d"/>
+  <text x="628" y="448" text-anchor="middle" font-size="8" fill="#6ee7b7">Postgres</text>
+  <rect x="670" y="436" width="114" height="18" rx="9" fill="#3f1d1d"/>
+  <text x="727" y="448" text-anchor="middle" font-size="8" fill="#fca5a5">Redis (rate-limit)</text>
+
+  <text x="652" y="470" text-anchor="middle" font-size="9" fill="#4b5563" letter-spacing="0.5">AUTH</text>
+  <rect x="520" y="476" width="92" height="18" rx="9" fill="#161b22" stroke="#238636" stroke-width="1"/>
+  <text x="566" y="488" text-anchor="middle" font-size="8" fill="#3fb950">Personal token</text>
+  <rect x="618" y="476" width="166" height="18" rx="9" fill="#001d3d" stroke="#0078d4" stroke-width="1"/>
+  <text x="701" y="488" text-anchor="middle" font-size="8" fill="#2899f5">Azure AD (humans, /ui)</text>
+
+  <!-- Transport -->
+  <rect x="560" y="512" width="184" height="18" rx="9" fill="#0d1117" fill-opacity="0.7"/>
+  <text x="652" y="524" text-anchor="middle" font-size="8" fill="#4b5563" letter-spacing="0.8">stdlib http.server · TLS optional</text>
+
+  <!-- ─── RIGHT: outputs ────────────────────────────────────────── -->
+  <line x1="806" y1="234" x2="870" y2="196" stroke="#3b82f6" stroke-width="1.5" stroke-opacity="0.55" marker-end="url(#arrow)" stroke-dasharray="4 3"/>
+  <line x1="806" y1="304" x2="870" y2="344" stroke="#10b981" stroke-width="1.5" stroke-opacity="0.55" marker-end="url(#arrow-green)" stroke-dasharray="4 3"/>
+
+  <!-- Approved memory graph -->
+  <g filter="url(#shadow)">
+    <rect x="870" y="112" width="196" height="156" rx="10" fill="url(#cardGrad)" stroke="#21262d" stroke-width="1.5"/>
+  </g>
+  <circle cx="968" cy="168" r="28" fill="#0d1f38" stroke="#1d4ed8" stroke-width="1.5"/>
+  <circle cx="960" cy="162" r="5" fill="#60a5fa"/>
+  <circle cx="976" cy="162" r="5" fill="#60a5fa"/>
+  <circle cx="968" cy="176" r="6" fill="#93c5fd"/>
+  <line x1="960" y1="162" x2="968" y2="176" stroke="#60a5fa" stroke-width="1.5"/>
+  <line x1="976" y1="162" x2="968" y2="176" stroke="#60a5fa" stroke-width="1.5"/>
+  <text x="968" y="208" text-anchor="middle" font-size="12" fill="#e6edf3">Memory graph</text>
+  <text x="968" y="224" text-anchor="middle" font-size="10" fill="#8b949e">team-isolated, approved-only</text>
+  <rect x="900" y="238" width="136" height="16" rx="8" fill="#1e40af" fill-opacity="0.4"/>
+  <text x="968" y="249" text-anchor="middle" font-size="8" fill="#93c5fd" letter-spacing="0.5">TRAVERSAL, NOT A PROXY</text>
+
+  <!-- Review UI -->
+  <g filter="url(#shadow)">
+    <rect x="870" y="280" width="196" height="200" rx="10" fill="url(#cardGrad)" stroke="#21262d" stroke-width="1.5"/>
+  </g>
+  <text x="968" y="304" text-anchor="middle" font-size="11" fill="#8b949e">Review UI · GET /ui</text>
+
+  <circle cx="900" cy="330" r="14" fill="#161b22" stroke="#10b981" stroke-width="1.2"/>
+  <circle cx="900" cy="324" r="5" fill="#e6edf3"/>
+  <path d="M 892 338 Q 900 328 908 338" fill="none" stroke="#e6edf3" stroke-width="2"/>
+  <text x="920" y="328" font-size="10" fill="#e6edf3">Admin approves</text>
+  <text x="920" y="340" font-size="8" fill="#6e7681">or rejects, with a reason</text>
+
+  <circle cx="900" cy="372" r="14" fill="#1a0f10" stroke="#f59e0b" stroke-width="1.2"/>
+  <text x="900" y="377" text-anchor="middle" font-size="12" fill="#f59e0b">≈</text>
+  <text x="920" y="370" font-size="10" fill="#e6edf3">Auto-approve rules</text>
+  <text x="920" y="382" font-size="8" fill="#6e7681">by tag or by agent</text>
+
+  <circle cx="900" cy="414" r="14" fill="#001d3d" stroke="#0078d4" stroke-width="1.2"/>
+  <text x="900" y="419" text-anchor="middle" font-size="11" fill="#2899f5">✦</text>
+  <text x="920" y="412" font-size="10" fill="#e6edf3">Azure AD sign-in</text>
+  <text x="920" y="424" font-size="8" fill="#6e7681">humans only, linked accounts</text>
+
+  <rect x="900" y="448" width="136" height="16" rx="8" fill="#1f3a1f" fill-opacity="0.7"/>
+  <text x="968" y="459" text-anchor="middle" font-size="8" fill="#3fb950" letter-spacing="0.5">GATE ENFORCED SERVER-SIDE</text>
+
+  <!-- K8s badge -->
+  <g filter="url(#shadow)">
+    <rect x="870" y="492" width="196" height="72" rx="10" fill="url(#cardGrad)" stroke="#21262d" stroke-width="1.5"/>
+  </g>
+  <circle cx="910" cy="528" r="18" fill="#1f2937" stroke="#d97706" stroke-width="1.2"/>
+  <circle cx="910" cy="528" r="6" fill="#fbbf24" fill-opacity="0.7"/>
+  <line x1="910" y1="513" x2="910" y2="519" stroke="#fbbf24" stroke-width="1.8"/>
+  <line x1="910" y1="537" x2="910" y2="543" stroke="#fbbf24" stroke-width="1.8"/>
+  <line x1="895" y1="528" x2="901" y2="528" stroke="#fbbf24" stroke-width="1.8"/>
+  <line x1="919" y1="528" x2="925" y2="528" stroke="#fbbf24" stroke-width="1.8"/>
+  <text x="968" y="521" text-anchor="middle" font-size="11" fill="#e6edf3">Kubernetes</text>
+  <text x="968" y="537" text-anchor="middle" font-size="9" fill="#8b949e">Helm chart · ArgoCD-managed</text>
+
+  <!-- ─── BOTTOM STRIP ──────────────────────────────────────────── -->
+  <rect x="32" y="590" width="1216" height="1" fill="#21262d"/>
+
+  <g transform="translate(40,607)">
+    <rect width="100" height="20" rx="10" fill="#1f2937"/>
+    <text x="50" y="14" text-anchor="middle" font-size="9" fill="#9ca3af">Python 3.11+</text>
+  </g>
+  <g transform="translate(148,607)">
+    <rect width="118" height="20" rx="10" fill="#1f2937"/>
+    <text x="59" y="14" text-anchor="middle" font-size="9" fill="#9ca3af">stdlib http.server</text>
+  </g>
+  <g transform="translate(274,607)">
+    <rect width="100" height="20" rx="10" fill="#1f2937"/>
+    <text x="50" y="14" text-anchor="middle" font-size="9" fill="#9ca3af">SQLite · Postgres</text>
+  </g>
+  <g transform="translate(382,607)">
+    <rect width="88" height="20" rx="10" fill="#1f2937"/>
+    <text x="44" y="14" text-anchor="middle" font-size="9" fill="#9ca3af">Redis cache</text>
+  </g>
+  <g transform="translate(478,607)">
+    <rect width="112" height="20" rx="10" fill="#1f2937"/>
+    <text x="56" y="14" text-anchor="middle" font-size="9" fill="#9ca3af">OpenTelemetry</text>
+  </g>
+  <g transform="translate(598,607)">
+    <rect width="92" height="20" rx="10" fill="#1f2937"/>
+    <text x="46" y="14" text-anchor="middle" font-size="9" fill="#9ca3af">Prometheus</text>
+  </g>
+  <g transform="translate(698,607)">
+    <rect width="70" height="20" rx="10" fill="#1f2937"/>
+    <text x="35" y="14" text-anchor="middle" font-size="9" fill="#9ca3af">Helm</text>
+  </g>
+  <g transform="translate(776,607)">
+    <rect width="78" height="20" rx="10" fill="#1f2937"/>
+    <text x="39" y="14" text-anchor="middle" font-size="9" fill="#9ca3af">ArgoCD</text>
+  </g>
+  <g transform="translate(1102,607)">
+    <rect width="146" height="20" rx="10" fill="#0f2238"/>
+    <text x="73" y="14" text-anchor="middle" font-size="9" fill="#60a5fa">polarpoint-io</text>
   </g>
 
-  <!-- ============================ wordmark ============================ -->
-  <text x="1030" y="446" font-family="Consolas, 'Courier New', monospace" font-weight="700"
-        font-size="128" letter-spacing="6" fill="#ffffff">AGENTHIVE</text>
-  <rect x="1030" y="486" width="1180" height="5" fill="#c98a2e"/>
-  <text x="1030" y="558" font-family="Consolas, 'Courier New', monospace" font-weight="500"
-        font-size="42" letter-spacing="1" fill="#c98a2e">Shared, reviewed memory for a team of coding agents</text>
-
-  <!-- ============================ footer ============================== -->
-  <g font-family="Consolas, 'Courier New', monospace" font-weight="400" font-size="36" fill="#8f9498">
-    <text x="86" y="820">&gt; team / agent / task graph, approval gate before anything is shared</text>
-    <text x="86" y="868">&gt; bounded retrieval by traversal, not a proxy on every LLM call</text>
-    <text x="86" y="916">&gt; SQLite or Postgres, metrics + OpenTelemetry tracing built in</text>
-    <text x="2314" y="916" text-anchor="end" fill="#c98a2e" opacity=".85">polarpoint-io/agenthive</text>
-  </g>
 </svg>
