@@ -1,3 +1,10 @@
+# [1.6.0](https://github.com/polarpoint-io/agenthive/compare/v1.5.0...v1.6.0) (2026-09-13)
+
+
+### Features
+
+* **helm:** add an optional standalone review-UI deployment ([7bb697d](https://github.com/polarpoint-io/agenthive/commit/7bb697d94dd98a5e8d902cc827032435288a3759))
+
 # [1.5.0](https://github.com/polarpoint-io/agenthive/compare/v1.4.0...v1.5.0) (2026-09-13)
 
 
