@@ -1,3 +1,10 @@
+# [1.5.0](https://github.com/polarpoint-io/agenthive/compare/v1.4.0...v1.5.0) (2026-09-13)
+
+
+### Features
+
+* **ui:** add a standalone nginx container for the review UI ([d28e315](https://github.com/polarpoint-io/agenthive/commit/d28e3152009a815d21c052d44eec9147e20238f0))
+
 # [1.4.0](https://github.com/polarpoint-io/agenthive/compare/v1.3.0...v1.4.0) (2026-09-13)
 
 
