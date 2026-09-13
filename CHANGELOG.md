@@ -1,3 +1,10 @@
+# [1.4.0](https://github.com/polarpoint-io/agenthive/compare/v1.3.0...v1.4.0) (2026-09-13)
+
+
+### Features
+
+* **ui:** stop assuming the review UI shares an origin with the API ([93ad1ac](https://github.com/polarpoint-io/agenthive/commit/93ad1acc4ddba78622ceccaaffc696cd8bac7afa))
+
 # [1.3.0](https://github.com/polarpoint-io/agenthive/compare/v1.2.0...v1.3.0) (2026-09-13)
 
 
