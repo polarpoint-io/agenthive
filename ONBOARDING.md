@@ -175,6 +175,10 @@ UI:
 $AGENTHIVE_URL/ui
 ```
 
+(Running the review UI as its own container instead? See README.md's
+"Splitting the review UI into its own container" - same UI, different
+URL.)
+
 Enter the base URL, your team ID, and an **admin** token. You'll see a
 pending queue (title, body preview, agent/task if set) with Approve /
 Reject buttons, plus tabs for users, auto-approve rules, and the metrics

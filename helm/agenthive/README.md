@@ -144,6 +144,31 @@ Users card, or `POST /teams/{id}/users/{id}/link-azure`. See
 `../../ADR.md`'s "Authentication" section and `../../README.md`'s "Azure
 AD sign-in" section.
 
+## Standalone review UI
+
+Off by default - `GET /ui` on the app's own Service keeps working with
+nothing else to install. Turn this on if you'd rather the review UI not
+share an origin/port with the API (its own Ingress host, its own scaling,
+a stricter NetworkPolicy on the API pod, etc.):
+
+```bash
+helm upgrade agenthive helm/agenthive --reuse-values \
+  --set ui.enabled=true \
+  --set ui.apiUrl=https://agenthive.yourcompany.com \
+  --set ui.publicUrl=https://agenthive-ui.yourcompany.com \
+  --set ui.ingress.enabled=true \
+  --set ui.ingress.host=agenthive-ui.yourcompany.com
+```
+
+This renders a second, independent Deployment/Service/Ingress
+(`templates/ui-*.yaml`) from `ghcr.io/polarpoint-io/agenthive-ui` (the
+image built from the repo root's `ui/Dockerfile`, same release cadence
+as the main image - see `.github/workflows/images.yml`). `ui.publicUrl`
+is what makes Azure AD sign-in and cross-origin API calls work once
+you've split it out this way - it sets the app's `AGENTHIVE_UI_URL` and
+`AGENTHIVE_CORS_ORIGIN` for you; see `../../README.md`'s "Splitting the
+review UI into its own container" for what those actually do.
+
 ## What's deliberately NOT in this chart
 
 - **No bundled Postgres or Redis.** Point `database.postgres.url` /
@@ -166,4 +191,5 @@ AD sign-in" section.
 See `values.yaml` - every key has an explanatory comment. The ones you
 are most likely to touch on a real install: `image.repository`/`tag`,
 `database.type`, `database.postgres.existingSecret`,
-`redis.existingSecret`, `ingress.*`, `resources`, `autoscaling.*`.
+`redis.existingSecret`, `ingress.*`, `resources`, `autoscaling.*`,
+`ui.*` (see "Standalone review UI" above).

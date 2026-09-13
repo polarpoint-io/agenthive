@@ -176,6 +176,18 @@ client. Design choices worth calling out:
 - **One new optional dependency.** PyJWT (with its `[crypto]` extra) is
   lazily imported (`oidc.py`), same pattern as `psycopg2`/`redis` - a
   deployment that never sets `AGENTHIVE_AZURE_*` never needs it installed.
+- **The review UI doesn't have to share this server's origin.** The
+  redirects above originally hardcoded `/ui` on this same process, which
+  is fine until you want the UI on a different host (its own Ingress,
+  its own scaling - see `ui/Dockerfile`, README.md's "Splitting the
+  review UI into its own container"). `AGENTHIVE_UI_URL` overrides where
+  they point, `AGENTHIVE_CORS_ORIGIN` opts the API into answering
+  cross-origin browser requests (default `*` - safe here specifically
+  because auth is `X-API-Key`, a header a browser only sends when code on
+  the page adds it, never a cookie it attaches automatically; wildcard
+  CORS is a real risk for cookie auth, not this). Both default to the
+  same-origin behavior above, so a deployment that never sets them is
+  unaffected.
 
 ## Storage
 

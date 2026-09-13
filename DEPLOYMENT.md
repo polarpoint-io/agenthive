@@ -20,6 +20,12 @@ enforces the constraints below itself (e.g. it refuses to render more
 than one replica against SQLite) rather than letting you discover them
 at runtime.
 
+The review UI is served at the app's own `/ui` by default - no separate
+deploy. Set `ui.enabled=true` (plus `ui.publicUrl`/`ui.ingress.host`) to
+run it as its own Deployment/Service/Ingress instead - see README.md's
+"Splitting the review UI into its own container" and this chart's own
+`values.yaml` `ui.*` block.
+
 ## Docker Compose - single host
 
 ```bash
@@ -38,6 +44,10 @@ Add Postgres (`docker compose --profile postgres up -d`, then uncomment
 concurrently, and Redis (`docker compose --profile redis up -d`, then
 uncomment `REDIS_URL`) once you run more than one instance at all - see
 "Known limitations" below for why that second one matters.
+
+Add `docker compose --profile split-ui up -d` to run the review UI as
+its own container (port 8080) instead of at the app's `/ui` - see
+README.md's "Splitting the review UI into its own container".
 
 ## Running without Docker
 

@@ -56,7 +56,9 @@ PR.
 - **A small review UI:** `GET /ui` serves a single-page app for approving/
   rejecting pending memory, managing auto-approve rules, managing users,
   and a per-team metrics snapshot - no separate build step, no separate
-  deploy.
+  deploy by default; it can also be split into its own container if you'd
+  rather not expose it on the same origin as the API - see "Splitting the
+  review UI into its own container" below.
 - **Shared across replicas via Redis:** set `REDIS_URL` and the rate
   limiter and the retrieval cache both switch from in-memory (single
   replica only) to Redis-backed (shared across every replica). Required
@@ -170,8 +172,10 @@ repo's README for setup.
 
 ## Reviewing pending memory
 
-Open `http://127.0.0.1:8790/ui` in a browser, enter the base URL, team
-ID, and an **admin** token, and approve/reject from there - or script it:
+Open `http://127.0.0.1:8790/ui` in a browser (or wherever you've deployed
+it - see "Splitting the review UI into its own container" below), enter
+the base URL, team ID, and an **admin** token, and approve/reject from
+there - or script it:
 
 ```python
 pending = admin.list_pending()
@@ -237,6 +241,48 @@ from then on that person can sign in with Microsoft and lands as that
 user, with a session that expires automatically
 (`AGENTHIVE_AZURE_SESSION_TTL_SECONDS`, default 1 hour) rather than
 living forever like an agent's token.
+
+## Splitting the review UI into its own container
+
+By default `GET /ui` on this same server is the whole story - nothing
+else to deploy. If you'd rather not expose the review UI on the same
+origin/port as the API (different ingress host, different scaling
+profile, a stricter network policy on the API, etc.), `ui/Dockerfile`
+builds it as its own static-file nginx container instead. The app's own
+`/ui` route keeps working either way - this is an addition, not a
+replacement, so you can run both during a migration or just pick one.
+
+**Docker Compose:**
+
+```bash
+docker compose --profile split-ui up -d
+# UI:  http://localhost:8080
+# API: http://localhost:8790
+```
+
+**Helm:**
+
+```yaml
+ui:
+  enabled: true
+  apiUrl: https://agenthive.yourcompany.com        # pre-fills "Base URL"
+  publicUrl: https://agenthive-ui.yourcompany.com   # this UI's own origin
+  ingress:
+    enabled: true
+    host: agenthive-ui.yourcompany.com
+```
+
+Setting `ui.publicUrl` writes `AGENTHIVE_UI_URL` and
+`AGENTHIVE_CORS_ORIGIN` into the API's config, so Azure AD sign-in
+redirects land on the separate UI (instead of the API's own `/ui`) and
+the API accepts cross-origin browser requests from it. Without Azure AD
+configured, none of this is required - the UI's "Base URL" field already
+supports pointing at a different API host manually, since `X-API-Key` is
+a header you type in, never a cookie a browser sends automatically.
+
+See `helm/agenthive/values.yaml`'s `ui.*` block for the rest of the
+knobs (image, resources, ingress TLS, ...) - it mirrors the main chart's
+own `image`/`ingress`/`resources` pattern.
 
 ## Testing
 
@@ -370,9 +416,10 @@ flagged as gaps at some point and are closed now - see `ADR.md`.
 - `retrieval.py` - the traversal algorithm, scoped to team + approved-only
 - `server.py` - the HTTP API (stdlib `http.server`) + structured logging + health checks + TLS + tracing
 - `client.py` - what an agent session (or an admin script) actually calls; propagates trace context
-- `ui/index.html` - the review UI, served at `GET /ui` (approve/reject, users, auto-approve rules, metrics)
+- `ui/index.html` - the review UI, served at `GET /ui` by default, or standalone via `ui/Dockerfile` (approve/reject, users, auto-approve rules, metrics)
+- `ui/Dockerfile`, `ui/nginx.conf` - the standalone review-UI container - see "Splitting the review UI into its own container"
 - `tests/` - pytest suite (unit + end-to-end against a real running server, incl. Redis, TLS, and tracing)
-- `Dockerfile`, `docker-compose.yml` - container packaging (SQLite, Postgres, Redis, and/or Jaeger profiles)
+- `Dockerfile`, `docker-compose.yml` - container packaging (SQLite, Postgres, Redis, Jaeger, and/or split-ui profiles)
 - `helm/agenthive/` - Kubernetes Helm chart (see its own README.md)
 - `.github/workflows/` - `ci.yml` (pytest against SQLite/Postgres/Redis), `chart.yml` (helm lint + render + validate), `images.yml` (build/push to GHCR), `release.yml` (semantic-release from conventional commits on `main`)
 - `Makefile`, `.releaserc.json`, `commitlint.config.js`, `package.json` - the same local build/release tooling used across polarpoint-io

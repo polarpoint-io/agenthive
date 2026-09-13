@@ -110,3 +110,22 @@ def test_ui_is_served(live_server):
         assert resp.status == 200
         body = resp.read().decode("utf-8")
         assert "AgentHive" in body
+
+
+def test_cors_enabled_by_default(live_server):
+    """A UI hosted on a different origin (see ui/Dockerfile) needs both a
+    successful preflight and Access-Control-Allow-Origin on the actual
+    response - CORS_ORIGIN defaults to "*", safe here specifically
+    because auth is an X-API-Key header a page has to add itself, never a
+    cookie a browser attaches automatically (see ADR.md)."""
+    import urllib.request
+
+    req = urllib.request.Request(live_server + "/healthz", method="OPTIONS")
+    with urllib.request.urlopen(req) as resp:
+        assert resp.status == 204
+        assert resp.headers["Access-Control-Allow-Origin"] == "*"
+        assert "OPTIONS" in resp.headers["Access-Control-Allow-Methods"]
+        assert "X-API-Key" in resp.headers["Access-Control-Allow-Headers"]
+
+    with urllib.request.urlopen(live_server + "/healthz") as resp:
+        assert resp.headers["Access-Control-Allow-Origin"] == "*"
