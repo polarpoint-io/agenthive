@@ -1,3 +1,10 @@
+## [1.1.2](https://github.com/polarpoint-io/agenthive/compare/v1.1.1...v1.1.2) (2026-09-13)
+
+
+### Bug Fixes
+
+* **ci:** grant packages:write to the release job ([60168cf](https://github.com/polarpoint-io/agenthive/commit/60168cfc189b17c91836c1918c4bfb352b1d85a2))
+
 ## [1.1.1](https://github.com/polarpoint-io/agenthive/compare/v1.1.0...v1.1.1) (2026-09-13)
 
 
