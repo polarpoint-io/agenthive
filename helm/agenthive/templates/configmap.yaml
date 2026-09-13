@@ -42,3 +42,7 @@ data:
   AGENTHIVE_AZURE_SESSION_TTL_SECONDS: {{ .Values.auth.azureAd.sessionTtlSeconds | quote }}
   {{- end }}
   {{- end }}
+  {{- if and .Values.ui.enabled .Values.ui.publicUrl }}
+  AGENTHIVE_UI_URL: {{ .Values.ui.publicUrl | quote }}
+  AGENTHIVE_CORS_ORIGIN: {{ .Values.ui.publicUrl | quote }}
+  {{- end }}

@@ -1,0 +1,33 @@
+{{- if and .Values.ui.enabled .Values.ui.ingress.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "agenthive.ui.fullname" . }}
+  labels:
+    {{- include "agenthive.ui.labels" . | nindent 4 }}
+  {{- with .Values.ui.ingress.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- if .Values.ui.ingress.className }}
+  ingressClassName: {{ .Values.ui.ingress.className }}
+  {{- end }}
+  {{- if .Values.ui.ingress.tls.enabled }}
+  tls:
+    - hosts:
+        - {{ .Values.ui.ingress.host }}
+      secretName: {{ .Values.ui.ingress.tls.secretName }}
+  {{- end }}
+  rules:
+    - host: {{ .Values.ui.ingress.host }}
+      http:
+        paths:
+          - path: {{ .Values.ui.ingress.path }}
+            pathType: {{ .Values.ui.ingress.pathType }}
+            backend:
+              service:
+                name: {{ include "agenthive.ui.fullname" . }}
+                port:
+                  number: {{ .Values.ui.service.port }}
+{{- end }}

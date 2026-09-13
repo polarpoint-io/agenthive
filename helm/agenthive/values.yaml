@@ -197,3 +197,66 @@ affinity: {}
 podDisruptionBudget:
   enabled: false
   minAvailable: 1
+
+# --- Optional standalone review-UI deployment (see ../../ui/Dockerfile in
+# the repo root). Off by default - the app's own built-in /ui (at
+# service.port above) keeps working either way, so turning this on
+# doesn't require turning that off. See this chart's README.md for a
+# walkthrough.
+ui:
+  enabled: false
+  replicaCount: 1
+  image:
+    registry: ghcr.io
+    repository: polarpoint-io/agenthive-ui
+    tag: ""
+    digest: ""
+    pullPolicy: IfNotPresent
+
+  # Pre-fills the UI's "Base URL" field with the app's externally-reachable
+  # URL (e.g. https://agenthive.example.com) - the field stays editable,
+  # this just saves users from typing it in every time.
+  apiUrl: ""
+
+  # The UI's own externally-reachable origin once ui.enabled is true (e.g.
+  # https://agenthive-ui.example.com, matching ui.ingress.host below) -
+  # written into the app's AGENTHIVE_UI_URL (so Azure AD sign-in redirects
+  # land here instead of the app's own /ui) and AGENTHIVE_CORS_ORIGIN (so
+  # the app accepts browser requests from here). Required for Azure AD
+  # sign-in to work against this UI; harmless to leave empty otherwise.
+  publicUrl: ""
+
+  service:
+    type: ClusterIP
+    port: 8080
+
+  ingress:
+    enabled: false
+    className: ""
+    annotations: {}
+    host: agenthive-ui.example.com
+    path: /
+    pathType: Prefix
+    tls:
+      enabled: false
+      secretName: ""
+
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 101
+    runAsGroup: 101
+    fsGroup: 101
+
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: false
+    capabilities:
+      drop: ["ALL"]
+
+  resources:
+    requests:
+      cpu: 25m
+      memory: 32Mi
+    limits:
+      cpu: 100m
+      memory: 64Mi

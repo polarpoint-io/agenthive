@@ -1,9 +1,14 @@
 name: images
 
-# Builds the AgentHive image and pushes it to GHCR under this
+# Builds the AgentHive images and pushes them to GHCR under this
 # repository's owner:
 #
-#   ghcr.io/polarpoint-io/agenthive
+#   ghcr.io/polarpoint-io/agenthive     - the API server (Dockerfile)
+#   ghcr.io/polarpoint-io/agenthive-ui  - the standalone review UI
+#                                          (ui/Dockerfile) - see
+#                                          helm/agenthive/values.yaml's
+#                                          ui.image.repository default,
+#                                          which expects this to exist.
 
 on:
   push:
@@ -18,6 +23,7 @@ on:
       - "**.py"
       - "Dockerfile"
       - "requirements.txt"
+      - "ui/**"
       - ".github/workflows/images.yml"
   workflow_dispatch:
 
@@ -108,6 +114,84 @@ jobs:
         if: github.event_name != 'pull_request'
         run: |
           echo "### agenthive" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          echo "digest: ${{ steps.build.outputs.digest }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "tags:" >> "$GITHUB_STEP_SUMMARY"
+          echo '${{ steps.meta.outputs.tags }}' >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+  build-ui:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Log in to GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Image metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/agenthive-ui
+          tags: |
+            # The v<version> tag semantic-release created; this is what the
+            # chart's ui.image.tag defaults to (same version as the API
+            # image and the chart itself - see images.yml's own job above).
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=ref,event=pr
+            type=sha,format=long
+            type=raw,value=latest,enable=${{ github.ref_type == 'tag' }}
+          labels: |
+            org.opencontainers.image.title=AgentHive UI
+            org.opencontainers.image.description=Standalone review UI for AgentHive - see ui/Dockerfile
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.licenses=MIT
+
+      - name: Build and push
+        id: build
+        uses: docker/build-push-action@v7
+        with:
+          context: ./ui
+          file: ui/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: ${{ github.event_name != 'pull_request' }}
+          load: ${{ github.event_name == 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          provenance: ${{ github.event_name != 'pull_request' && 'mode=max' || 'false' }}
+          sbom: ${{ github.event_name != 'pull_request' }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Smoke test the image
+        if: github.event_name == 'pull_request'
+        run: |
+          set -euo pipefail
+          image="$(echo '${{ steps.meta.outputs.tags }}' | head -n1)"
+          docker run -d --name smoke-ui -p 18080:8080 "$image"
+          for i in $(seq 1 30); do
+            curl -fsS http://localhost:18080/ && break || sleep 2
+          done
+          curl -fsS http://localhost:18080/ | grep -qi "AgentHive"
+          docker rm -f smoke-ui 2>/dev/null || true
+
+      - name: Report digest
+        if: github.event_name != 'pull_request'
+        run: |
+          echo "### agenthive-ui" >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
           echo "digest: ${{ steps.build.outputs.digest }}" >> "$GITHUB_STEP_SUMMARY"
           echo "tags:" >> "$GITHUB_STEP_SUMMARY"

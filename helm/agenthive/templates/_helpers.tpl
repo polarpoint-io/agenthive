@@ -166,3 +166,37 @@ built from the same release - see .github/workflows/release.yml).
 {{- printf "%s:%s" $repo (.Values.image.tag | default .Chart.AppVersion) -}}
 {{- end -}}
 {{- end -}}
+
+{{/*
+--- Standalone review-UI deployment (see values.yaml's ui.* and
+templates/ui-*.yaml). Deliberately its own app.kubernetes.io/name so its
+selector never collides with the main Deployment/Service above - changing
+those two chart resources' existing selectors on upgrade is not allowed
+by Kubernetes, so this stays fully separate rather than reusing them.
+*/}}
+{{- define "agenthive.ui.fullname" -}}
+{{ include "agenthive.fullname" . }}-ui
+{{- end -}}
+
+{{- define "agenthive.ui.selectorLabels" -}}
+app.kubernetes.io/name: {{ include "agenthive.name" . }}-ui
+app.kubernetes.io/instance: {{ .Release.Name }}
+{{- end -}}
+
+{{- define "agenthive.ui.labels" -}}
+helm.sh/chart: {{ include "agenthive.chart" . }}
+{{ include "agenthive.ui.selectorLabels" . }}
+{{- if .Chart.AppVersion }}
+app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
+{{- end }}
+app.kubernetes.io/managed-by: {{ .Release.Service }}
+{{- end -}}
+
+{{- define "agenthive.ui.image" -}}
+{{- $repo := printf "%s/%s" .Values.ui.image.registry .Values.ui.image.repository -}}
+{{- if .Values.ui.image.digest -}}
+{{- printf "%s@%s" $repo .Values.ui.image.digest -}}
+{{- else -}}
+{{- printf "%s:%s" $repo (.Values.ui.image.tag | default .Chart.AppVersion) -}}
+{{- end -}}
+{{- end -}}
