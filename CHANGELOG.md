@@ -1,3 +1,10 @@
+## [1.1.1](https://github.com/polarpoint-io/agenthive/compare/v1.1.0...v1.1.1) (2026-09-13)
+
+
+### Bug Fixes
+
+* **security:** use a numeric UID/GID for the container user ([e1a6180](https://github.com/polarpoint-io/agenthive/commit/e1a618074f9bd54d35c196049ff69519775d8c1b))
+
 # [1.1.0](https://github.com/polarpoint-io/agenthive/compare/v1.0.0...v1.1.0) (2026-09-12)
 
 
