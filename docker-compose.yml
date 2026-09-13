@@ -21,6 +21,16 @@
 #   docker compose --profile jaeger up -d
 #   (then uncomment OTEL_EXPORTER_OTLP_ENDPOINT on the app service below)
 #   open http://localhost:16686
+#
+# Run the review UI as its own container instead of at the app's /ui (see
+# ui/Dockerfile and README.md's "Splitting the review UI into its own
+# container"):
+#
+#   docker compose --profile split-ui up -d
+#   (then uncomment AGENTHIVE_UI_URL/AGENTHIVE_CORS_ORIGIN on the app
+#    service below so Azure AD sign-in redirects to the ui service instead
+#    of the app's own /ui)
+#   open http://localhost:8080
 
 services:
   app:
@@ -36,6 +46,9 @@ services:
       AGENTHIVE_LOG_JSON: "true"
       AGENTHIVE_RATE_LIMIT_PER_MINUTE: "120"
       AGENTHIVE_METRICS_ENABLED: "true"
+      # Uncomment when using the split-ui profile:
+      # AGENTHIVE_UI_URL: http://localhost:8080
+      # AGENTHIVE_CORS_ORIGIN: http://localhost:8080
       # Uncomment when using the jaeger profile (or point at any other
       # OTLP/HTTP-compatible backend - Tempo, Honeycomb, etc.):
       # OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
@@ -65,6 +78,19 @@ services:
   redis:
     image: redis:7-alpine
     profiles: ["redis"]
+    restart: unless-stopped
+
+  ui:
+    build: ./ui
+    profiles: ["split-ui"]
+    ports:
+      - "8080:8080"
+    environment:
+      # Reachable from *your browser*, not from inside the ui container -
+      # this is only a default for the "Base URL" field, the field stays
+      # editable. localhost:8790 assumes the app service's port mapping
+      # above; change it if you're running behind a reverse proxy instead.
+      AGENTHIVE_API_URL: http://localhost:8790
     restart: unless-stopped
 
   # All-in-one Jaeger: OTLP/HTTP receiver on 4318, trace storage in

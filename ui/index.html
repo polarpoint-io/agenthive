@@ -131,6 +131,12 @@
 </div>
 
 <script>
+// Overwritten at container start (see ui/docker-entrypoint.d/40-render-config.sh)
+// when this page is built into ui/Dockerfile's image and AGENTHIVE_API_URL is
+// set; left empty (falls through to the same-origin default below) for a
+// plain `open index.html` or the all-in-one deployment.
+window.AGENTHIVE_DEFAULT_API_URL = "AGENTHIVE_DEFAULT_API_URL_PLACEHOLDER";
+
 let conn = null;
 
 function loadConn(){
@@ -415,6 +421,10 @@ function handleAzureRedirect(){
 }
 
 (function init(){
+  const defaultApi = (window.AGENTHIVE_DEFAULT_API_URL || '').trim();
+  if (defaultApi && !defaultApi.startsWith('AGENTHIVE_DEFAULT_API_URL') && !document.getElementById('baseUrl').value){
+    document.getElementById('baseUrl').value = defaultApi;
+  }
   checkAzureStatus();
   if (handleAzureRedirect()) return;
   const saved = loadConn();
