@@ -16,10 +16,11 @@ RUN pip install --no-cache-dir \
 
 COPY . .
 
-RUN useradd --create-home --shell /usr/sbin/nologin agenthive \
+RUN groupadd --gid 1000 agenthive \
+    && useradd --uid 1000 --gid 1000 --create-home --shell /usr/sbin/nologin agenthive \
     && mkdir -p /data \
     && chown -R agenthive:agenthive /app /data
-USER agenthive
+USER 1000:1000
 
 ENV AGENTHIVE_HOST=0.0.0.0 \
     AGENTHIVE_PORT=8790 \
