@@ -275,10 +275,11 @@ the URL. Double-check `TEAM_ID` matches the team that token was created
 under.
 
 **Q: `agenthive_tokens_avoided_total` / the metrics summary is all zeros.**
-A: Either no `retrieve_context` calls have happened yet, or the anchor
-you're retrieving doesn't match any approved node's title (retrieval
-returns an empty neighborhood, not an error, on a miss - check
-`neighborhood_count` in the response).
+A: Either no `retrieve_context` calls have happened yet, or no approved
+title matches the anchor. An exact title wins; otherwise retrieval uses
+overlapping title tokens (not the note body) and caps that neighborhood.
+A miss still returns an empty neighborhood, not an error - check
+`neighborhood_count` in the response.
 
 **Q: I'm getting 429s almost immediately.**
 A: `AGENTHIVE_RATE_LIMIT_PER_MINUTE` (default 120) is shared across

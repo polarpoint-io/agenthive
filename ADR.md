@@ -109,7 +109,12 @@ can, so the gate is structural rather than a memory-encoded instruction.
 BFS outward from an anchor node's resolved links, stopping traversal
 (but not visitation) through any node whose out-degree exceeds
 `hub_cutoff`, restricted to `status=approved` and the given `team_id`.
-Returns the neighborhood plus an approximate token count.
+The anchor is an exact title slug when that note exists. Otherwise
+retrieval starts from the shortest approved title whose tokens cover the
+query (or the most specific shorter title whose tokens all appear in the
+query), and that fallback neighborhood is capped so a broad phrase cannot
+return the whole graph. Returns the neighborhood plus an approximate
+token count.
 
 ## Authentication
 
