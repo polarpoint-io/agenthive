@@ -1,3 +1,11 @@
+# [1.7.0](https://github.com/polarpoint-io/agenthive/compare/v1.6.1...v1.7.0) (2026-10-07)
+
+
+### Features
+
+* **retrieval:** match paraphrased titles by token overlap ([05ae941](https://github.com/polarpoint-io/agenthive/commit/05ae941bb965a8935699d6bd3a18e10e13aff39f))
+* **retrieval:** match paraphrased titles by token overlap ([76d8fc2](https://github.com/polarpoint-io/agenthive/commit/76d8fc234e2ea6437297d95a578d91afdd412055))
+
 ## [1.6.1](https://github.com/polarpoint-io/agenthive/compare/v1.6.0...v1.6.1) (2026-09-13)
 
 
