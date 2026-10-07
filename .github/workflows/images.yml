@@ -85,7 +85,10 @@ jobs:
         with:
           context: .
           file: Dockerfile
-          platforms: linux/amd64,linux/arm64
+          # A pull request loads the image for the smoke test. The docker
+          # exporter cannot hold a multi-arch manifest list, so that build
+          # is amd64 only. Tag and dispatch builds still push both platforms.
+          platforms: ${{ github.event_name == 'pull_request' && 'linux/amd64' || 'linux/amd64,linux/arm64' }}
           push: ${{ github.event_name != 'pull_request' }}
           load: ${{ github.event_name == 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
@@ -166,7 +169,8 @@ jobs:
         with:
           context: ./ui
           file: ui/Dockerfile
-          platforms: linux/amd64,linux/arm64
+          # Same constraint as the API image: load cannot export a manifest list.
+          platforms: ${{ github.event_name == 'pull_request' && 'linux/amd64' || 'linux/amd64,linux/arm64' }}
           push: ${{ github.event_name != 'pull_request' }}
           load: ${{ github.event_name == 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
