@@ -13,11 +13,40 @@ scoping rules baked in on purpose:
    unresolved [[link]] to a note that doesn't exist yet is dropped rather
    than treated as a dangling neighbor (this is the same bug fix applied
    to the Obsidian tool after the real vault audit surfaced it).
+
+Anchor resolution: an exact title slug is the fast path and is unchanged.
+If that slug is missing, retrieval starts from the shortest approved title
+whose tokens cover the query, or failing that from the most specific
+shorter title whose tokens all appear in the query. That fallback is capped
+so a broad phrase cannot return the whole graph. Tokens are whole words
+(a single letter never matches), and body text is not searched.
 """
+
+import re
+
+_TOKEN_RE = re.compile(r"[a-z0-9]+")
+# A one-character token ("a") would match almost every title.
+_MIN_TOKEN_LEN = 2
+# Applied only when the anchor was not an exact title. Exact matches keep
+# the hop and hub limits the caller asked for.
+_FALLBACK_MAX_NODES = 8
+_FALLBACK_MAX_STARTS = 3
+_STOPWORDS = frozenset({
+    "a", "an", "the", "and", "or", "of", "to", "for", "in", "on", "with",
+    "by", "from", "at", "as", "is", "it", "be", "this", "that",
+})
 
 
 def slug(title: str) -> str:
     return title.strip().lower()
+
+
+def significant_tokens(title: str) -> list:
+    """Whole-word tokens used for the non-exact fallback. Not used by slug()."""
+    return [
+        tok for tok in _TOKEN_RE.findall(slug(title))
+        if len(tok) >= _MIN_TOKEN_LEN and tok not in _STOPWORDS
+    ]
 
 
 def build_graph(nodes: list) -> dict:
@@ -37,6 +66,49 @@ def build_graph(nodes: list) -> dict:
                 adj[t].add(s)
 
     return {"by_slug": by_slug, "adj": adj}
+
+
+def resolve_start_slugs(graph: dict, anchor_title: str) -> tuple:
+    """Return (start_slugs, exact).
+
+    exact is True when anchor_title's slug is an approved note. Otherwise
+    start_slugs is a short, ranked fallback (possibly empty)."""
+    by_slug = graph["by_slug"]
+    exact = slug(anchor_title)
+    if exact in by_slug:
+        return [exact], True
+
+    wanted = significant_tokens(anchor_title)
+    if not wanted:
+        return [], False
+    wanted_set = set(wanted)
+
+    covering = []
+    covered_by_query = []
+    for node_slug, node in by_slug.items():
+        title_tokens = significant_tokens(node["title"])
+        if not title_tokens:
+            continue
+        title_set = set(title_tokens)
+        if wanted_set <= title_set:
+            precision = len(wanted_set) / float(len(title_tokens))
+            covering.append((-precision, len(title_tokens), len(node_slug), node_slug))
+        elif title_set <= wanted_set:
+            covered_by_query.append((-len(title_set), len(node_slug), node_slug))
+
+    if covering:
+        covering.sort()
+        return [covering[0][3]], False
+
+    if not covered_by_query:
+        return [], False
+    covered_by_query.sort()
+    best_token_count = -covered_by_query[0][0]
+    starts = [
+        row[2] for row in covered_by_query
+        if -row[0] == best_token_count
+    ][:_FALLBACK_MAX_STARTS]
+    return starts, False
 
 
 def traverse(graph: dict, anchor_title: str, hops: int = 2, hub_cutoff: int = 15) -> list:
@@ -75,7 +147,20 @@ def retrieve(approved_nodes: list, anchor_title: str, hops: int = 2,
     """High-level entry point used by the server. Returns the neighborhood
     plus an approximate token count, same shape as retrieve.py --show-tokens."""
     graph = build_graph(approved_nodes)
-    neighborhood = traverse(graph, anchor_title, hops, hub_cutoff)
+    starts, exact = resolve_start_slugs(graph, anchor_title)
+    neighborhood = []
+    seen = set()
+    for start in starts:
+        title = graph["by_slug"][start]["title"]
+        for node in traverse(graph, title, hops, hub_cutoff):
+            if node["id"] in seen:
+                continue
+            seen.add(node["id"])
+            neighborhood.append(node)
+            if not exact and len(neighborhood) >= _FALLBACK_MAX_NODES:
+                break
+        if not exact and len(neighborhood) >= _FALLBACK_MAX_NODES:
+            break
 
     total_chars = sum(len(n["body"]) for n in neighborhood)
     vault_chars = sum(len(n["body"]) for n in approved_nodes) or 1
