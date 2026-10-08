@@ -154,6 +154,7 @@ client.log_session(
 )
 ```
 
+
 This writes a node that starts `pending`, unless it matches an
 auto-approve rule.
 
