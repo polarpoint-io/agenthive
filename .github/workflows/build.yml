@@ -40,7 +40,7 @@ jobs:
         ports:
           - 5432:5432
         options: >-
-          --health-cmd pg_isready
+          --health-cmd "pg_isready -U agenthive -d agenthive"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
@@ -52,8 +52,45 @@ jobs:
       - run: pip install -r requirements.txt
       - name: Run end-to-end suite against Postgres
         env:
-          DATABASE_URL: postgresql://agenthive:agenthive@localhost:5432/agenthive
-        run: pytest -v tests/test_end_to_end.py tests/test_auth.py tests/test_autoapprove.py tests/test_metrics_and_cache.py
+          DATABASE_URL: postgresql://agenthive:agenthive@127.0.0.1:5432/agenthive
+        run: |
+          set +e
+          python - << 'PY'
+          import os, sys, time
+          import psycopg2
+          url = os.environ["DATABASE_URL"]
+          last = None
+          for i in range(30):
+              try:
+                  psycopg2.connect(url).close()
+                  print(f"postgres ready after {i}s")
+                  sys.exit(0)
+              except Exception as e:
+                  last = e
+                  time.sleep(1)
+          print(f"postgres never accepted connections: {last}", file=sys.stderr)
+          sys.exit(1)
+          PY
+          ready=$?
+          if [ "$ready" -ne 0 ]; then
+            echo "::error::Postgres did not accept connections"
+            exit "$ready"
+          fi
+          pytest -v --tb=short \
+            tests/test_end_to_end.py tests/test_auth.py \
+            tests/test_autoapprove.py tests/test_metrics_and_cache.py \
+            > pytest-postgres.txt 2>&1
+          code=$?
+          tail -n 120 pytest-postgres.txt
+          if [ "$code" -ne 0 ]; then
+            python - << 'PY'
+          import pathlib
+          tail = pathlib.Path("pytest-postgres.txt").read_text(errors="replace")[-3000:]
+          tail = tail.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+          print(f"::error title=Postgres pytest::Postgres pytest failed%0A{tail}")
+          PY
+          fi
+          exit "$code"
 
   test-redis:
     runs-on: ubuntu-latest
