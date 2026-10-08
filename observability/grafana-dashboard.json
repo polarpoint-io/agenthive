@@ -28,7 +28,7 @@
         { "expr": "agenthive_tokens_avoided_total", "legendFormat": "tokens avoided" }
       ],
       "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
-      "description": "Running total of (full-team tokens - what was actually returned) across every retrieval since the process started. The headline 'this is why it's worth reviewing memory' number."
+      "description": "Running total of (full-team tokens - what was actually returned) for retrievals that returned at least one note. An empty result does not increment this: nothing was served, so nothing was avoided. This is scoped context versus a full-graph dump, not an LLM bill."
     },
     {
       "id": 2,
@@ -54,7 +54,8 @@
           "legendFormat": "avg reduction %"
         }
       ],
-      "fieldConfig": { "defaults": { "unit": "percent", "max": 100, "min": 0 }, "overrides": [] }
+      "fieldConfig": { "defaults": { "unit": "percent", "max": 100, "min": 0 }, "overrides": [] },
+      "description": "Average reduction_pct on retrievals that returned a note. Empty retrievals are excluded. A figure near 100% from misses used to mean the opposite of a saving."
     },
     {
       "id": 4,
@@ -141,6 +142,33 @@
         }
       ],
       "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] }
+    },
+    {
+      "id": 11,
+      "title": "Anchor hit rate",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 36 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        {
+          "expr": "sum(rate(agenthive_retrieval_hits_total[15m])) / clamp_min(sum(rate(agenthive_retrieval_hits_total[15m])) + sum(rate(agenthive_retrieval_empty_total[15m])), 1)",
+          "legendFormat": "hit rate"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "percentunit", "max": 1, "min": 0 }, "overrides": [] },
+      "description": "Share of retrieve_context calls that returned a note. This is not the retrieval cache hit rate. A low rate means anchors are missing approved titles; the review UI lists those anchors per team."
+    },
+    {
+      "id": 12,
+      "title": "Retrievals that returned a note vs. empty",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 36 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        { "expr": "rate(agenthive_retrieval_hits_total[15m])", "legendFormat": "returned a note" },
+        { "expr": "rate(agenthive_retrieval_empty_total[15m])", "legendFormat": "empty" }
+      ],
+      "description": "Empty calls matched no approved title. They do not add to tokens avoided."
     }
   ]
 }

@@ -17,11 +17,14 @@ overclaim here:
   neighborhood this one retrieval returned" (`approx_tokens_full_team`
   vs `approx_tokens`, both from `retrieval.py`, counted as chars/4 - a
   rough approximation, not a real tokenizer). `agenthive_tokens_avoided_total`
-  is the running sum of that gap. Read it as "tokens NOT sent because
-  retrieval was scoped instead of dumped," not as "tokens saved on your
-  OpenAI/Anthropic bill" - the second claim would need this service to
-  see your actual model calls, which it deliberately doesn't (see
-  ADR.md's "Why not build an LLM-request proxy").
+  is the running sum of that gap **for retrievals that returned at
+  least one note**. An empty result increments
+  `agenthive_retrieval_empty_total` and adds nothing to tokens avoided:
+  nothing was served, so nothing was spared. Read the avoided counter as
+  "tokens NOT sent because retrieval was scoped instead of dumped," not
+  as "tokens saved on your OpenAI/Anthropic bill" - the second claim
+  would need this service to see your actual model calls, which it
+  deliberately doesn't (see ADR.md's "Why not build an LLM-request proxy").
 - **The retrieval cache reduces graph-traversal work and DB load, not
   model calls.** AgentHive doesn't sit in front of inference, so it has
   no calls to a model to cache or reduce. What the cache demonstrably
@@ -62,9 +65,16 @@ overclaim here:
   everything approved) grows without limit as the team accumulates
   memory.
 - **Average retrieval reduction %**: per-call average of
-  `reduction_pct` from `retrieval.py`. A number near 0% across many
-  retrievals usually means `hops`/`hub_cutoff` are set too loose for
-  this team's graph shape (worth tuning per ADR.md's traversal notes).
+  `reduction_pct` from `retrieval.py`, **only when a note was returned**.
+  Empty retrievals are left out. A number near 0% across many hits
+  usually means `hops`/`hub_cutoff` are set too loose for this team's
+  graph shape (worth tuning per ADR.md's traversal notes).
+- **Anchor hit rate**: share of `retrieve_context` calls that returned a
+  note (`agenthive_retrieval_hits_total` vs
+  `agenthive_retrieval_empty_total`). This is separate from the cache
+  hit rate. Which phrases missed, and whether a pending note would have
+  matched, is on the review UI's Metrics tab (`top_missed_anchors`),
+  not in Prometheus - anchor text would be an unbounded label.
 - **Cache hit rate** and **cross-teammate cache hits**: the "shared
   memory, not N copies" evidence. A hit rate near zero with real traffic
   either means the TTL (`AGENTHIVE_CACHE_TTL_SECONDS`) is too short for
@@ -118,4 +128,6 @@ teammates, how many retrievals *this* team has made, how many active
 users *this* team has. Backed by `memory_access_log` in `db.py` - one
 row per (retrieval, node, user), which is also what
 `agenthive_cross_user_cache_hits_total` is corroborating from the cache
-side.
+side. Empty retrievals are aggregated in `retrieval_misses` (one row per
+normalised anchor) and returned as `retrieval_misses` /
+`top_missed_anchors`, including a pending title that would have matched.

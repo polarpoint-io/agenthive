@@ -122,6 +122,22 @@ CREATE TABLE IF NOT EXISTS memory_access_log (
 CREATE INDEX IF NOT EXISTS idx_access_team ON memory_access_log(team_id);
 CREATE INDEX IF NOT EXISTS idx_access_node ON memory_access_log(node_id);
 
+-- One row per (team, normalised anchor) that returned no approved note.
+-- Aggregated on purpose: the review UI needs "what do people keep
+-- missing" without a row per call, and the anchor text must not become
+-- a Prometheus label. anchor_key is the trimmed lower-case anchor.
+CREATE TABLE IF NOT EXISTS retrieval_misses (
+    team_id TEXT NOT NULL REFERENCES teams(id),
+    anchor_key TEXT NOT NULL,
+    anchor TEXT NOT NULL,
+    miss_count INTEGER NOT NULL,
+    last_user_id TEXT NOT NULL REFERENCES users(id),
+    last_missed_at TEXT NOT NULL,
+    PRIMARY KEY (team_id, anchor_key)
+);
+
+CREATE INDEX IF NOT EXISTS idx_miss_team ON retrieval_misses(team_id, miss_count);
+
 -- Short-lived, single-use: one row per in-flight Azure AD login attempt,
 -- created at GET /auth/azure/login and deleted the moment GET
 -- /auth/azure/callback consumes it (success or failure - never replayed).
@@ -696,6 +712,28 @@ class Store:
             )
         return retrieval_id
 
+    def record_retrieval_miss(self, team_id: str, anchor: str, user_id: str) -> None:
+        """Count one empty retrieve_context for this anchor. Repeated
+        misses of the same phrase (ignoring case and surrounding space)
+        increment one row so the review UI can show what to title next."""
+        from retrieval import slug
+
+        key = slug(anchor)[:200]
+        display = anchor.strip()[:200]
+        if not key:
+            return
+        self.backend.execute(
+            "INSERT INTO retrieval_misses "
+            "(team_id, anchor_key, anchor, miss_count, last_user_id, last_missed_at) "
+            "VALUES (?, ?, ?, 1, ?, ?) "
+            "ON CONFLICT (team_id, anchor_key) DO UPDATE SET "
+            "miss_count = retrieval_misses.miss_count + 1, "
+            "anchor = excluded.anchor, "
+            "last_user_id = excluded.last_user_id, "
+            "last_missed_at = excluded.last_missed_at",
+            (team_id, key, display, user_id, now()),
+        )
+
     def team_metrics_summary(self, team_id: str) -> dict:
         node_rows = self.backend.query_all(
             "SELECT status, COUNT(*) as n FROM memory_nodes WHERE team_id = ? GROUP BY status",
@@ -733,12 +771,40 @@ class Store:
             (team_id,),
         )
 
+        miss_row = self.backend.query_one(
+            "SELECT COALESCE(SUM(miss_count), 0) as n FROM retrieval_misses WHERE team_id = ?",
+            (team_id,),
+        )
+        retrieval_misses = miss_row["n"] if miss_row else 0
+
+        miss_rows = self.backend.query_all(
+            "SELECT anchor, miss_count, last_missed_at FROM retrieval_misses "
+            "WHERE team_id = ? ORDER BY miss_count DESC, last_missed_at DESC LIMIT 10",
+            (team_id,),
+        )
+        from retrieval import pending_title_match
+
+        pending = self.list_pending(team_id)
+        top_missed = []
+        for row in miss_rows:
+            match = pending_title_match(pending, row["anchor"])
+            top_missed.append({
+                "anchor": row["anchor"],
+                "miss_count": row["miss_count"],
+                "last_missed_at": row["last_missed_at"],
+                "pending_id": match["id"] if match else None,
+                "pending_title": match["title"] if match else None,
+            })
+
         return {
             "node_counts": node_counts,
             "total_retrievals": total_retrievals,
+            "retrieval_hits": total_retrievals,
+            "retrieval_misses": retrieval_misses,
             "active_users": active_users,
             "active_auto_approve_rules": rule_count_row["n"] if rule_count_row else 0,
             "top_reused_nodes": top_nodes,
+            "top_missed_anchors": top_missed,
         }
 
     # ---- global (cross-team) stats for the /metrics gauges ----

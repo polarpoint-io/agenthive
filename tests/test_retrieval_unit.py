@@ -60,9 +60,12 @@ def test_retrieve_reports_token_reduction():
 
 
 def test_retrieve_missing_anchor_returns_empty_neighborhood():
-    nodes = [node("A")]
+    nodes = [node("A", body="x" * 100)]
     result = retrieve(nodes, "Does Not Exist")
     assert result["neighborhood_count"] == 0
+    assert result["approx_tokens"] == 0
+    # A miss served nothing. 100 here used to read as a perfect saving.
+    assert result["reduction_pct"] == 0
 
 
 def test_exact_title_beats_a_shorter_overlapping_title():
@@ -120,6 +123,15 @@ def test_fallback_neighborhood_is_capped():
 
     exact = retrieve(nodes, "Widget rollout", hops=1)
     assert exact["neighborhood_count"] == 13
+
+
+def test_pending_title_match_points_at_the_note_that_would_hit():
+    from retrieval import pending_title_match
+
+    pending = [node("Key Vault rotation", body="still pending")]
+    match = pending_title_match(pending, "Key Vault")
+    assert match["title"] == "Key Vault rotation"
+    assert pending_title_match(pending, "GitOps") is None
 
 
 def test_resolve_start_slugs_reports_exact_match():

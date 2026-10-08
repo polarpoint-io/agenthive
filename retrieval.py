@@ -164,6 +164,12 @@ def retrieve(approved_nodes: list, anchor_title: str, hops: int = 2,
 
     total_chars = sum(len(n["body"]) for n in neighborhood)
     vault_chars = sum(len(n["body"]) for n in approved_nodes) or 1
+    # An empty neighborhood served nothing. Counting that as a 100%
+    # reduction made misses look like the best possible saving.
+    if neighborhood and vault_chars:
+        reduction_pct = round(100 - (100 * total_chars / vault_chars), 1)
+    else:
+        reduction_pct = 0
 
     return {
         "anchor": anchor_title,
@@ -175,5 +181,19 @@ def retrieve(approved_nodes: list, anchor_title: str, hops: int = 2,
         ],
         "approx_tokens": total_chars // 4,
         "approx_tokens_full_team": vault_chars // 4,
-        "reduction_pct": round(100 - (100 * total_chars / vault_chars), 1) if vault_chars else 0,
+        "reduction_pct": reduction_pct,
     }
+
+
+def pending_title_match(pending_nodes: list, anchor_title: str):
+    """If a still-pending note would have satisfied this anchor, return
+    its id and title. Reviewers use this to approve the note that turns
+    a repeated miss into a hit. Body text is not included."""
+    if not pending_nodes:
+        return None
+    graph = build_graph(pending_nodes)
+    starts, exact = resolve_start_slugs(graph, anchor_title)
+    if not starts:
+        return None
+    node = graph["by_slug"][starts[0]]
+    return {"id": node["id"], "title": node["title"], "exact": exact}

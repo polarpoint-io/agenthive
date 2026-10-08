@@ -97,6 +97,55 @@ def test_team_metrics_summary_tracks_reuse(live_server, client_lib):
     assert top["distinct_users"] == 2
 
 
+def _prom_counter(live_server, name):
+    with urllib.request.urlopen(live_server + "/metrics") as resp:
+        body = resp.read().decode("utf-8")
+    prefix = name + " "
+    for line in body.splitlines():
+        if line.startswith(prefix):
+            return float(line.split()[-1])
+    return 0.0
+
+
+def test_empty_retrieval_does_not_count_as_tokens_avoided(live_server, client_lib):
+    team, c = _admin_client(live_server, client_lib, name="Miss metrics")
+    served = c.log_session(title="Served Note", body="x" * 40)
+    other = c.log_session(title="Other Note", body="y" * 80)
+    c.approve(served["id"])
+    c.approve(other["id"])
+
+    avoided_before = _prom_counter(live_server, "agenthive_tokens_avoided_total")
+    empty_before = _prom_counter(live_server, "agenthive_retrieval_empty_total")
+    hits_before = _prom_counter(live_server, "agenthive_retrieval_hits_total")
+    missed = c.retrieve_context("no such note", hops=0)
+    assert missed["neighborhood_count"] == 0
+    assert missed["reduction_pct"] == 0
+    assert _prom_counter(live_server, "agenthive_tokens_avoided_total") == avoided_before
+    assert _prom_counter(live_server, "agenthive_retrieval_empty_total") == empty_before + 1
+
+    hit = c.retrieve_context("Served Note", hops=0)
+    assert hit["neighborhood_count"] == 1
+    assert hit["approx_tokens"] > 0
+    assert _prom_counter(live_server, "agenthive_tokens_avoided_total") > avoided_before
+    assert _prom_counter(live_server, "agenthive_retrieval_hits_total") == hits_before + 1
+
+
+def test_metrics_summary_lists_missed_anchors_and_a_pending_title(live_server, client_lib):
+    team, c = _admin_client(live_server, client_lib, name="Miss list")
+    c.retrieve_context("Key Vault")
+    c.retrieve_context("key vault")
+    pending = c.log_session(title="Key Vault rotation", body="approve me")
+
+    summary = c._request("GET", "/teams/" + team["id"] + "/metrics/summary")
+    assert summary["retrieval_hits"] == 0
+    assert summary["retrieval_misses"] == 2
+    top = summary["top_missed_anchors"][0]
+    assert top["anchor"].lower() == "key vault"
+    assert top["miss_count"] == 2
+    assert top["pending_id"] == pending["id"]
+    assert top["pending_title"] == "Key Vault rotation"
+
+
 def test_member_cannot_read_metrics_summary(live_server, client_lib):
     team, admin_c = _admin_client(live_server, client_lib)
     member = admin_c.create_user("teammate", role="member")

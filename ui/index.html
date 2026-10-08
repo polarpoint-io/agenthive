@@ -114,7 +114,8 @@
       <h2>Metrics <span class="pill admin">admin</span></h2>
       <div id="metricsSummary" class="empty">No data yet.</div>
       <div id="topReusedNodes" style="margin-top:12px"></div>
-      <p class="sub" style="margin-top:12px">Cross-team trends (tokens avoided, cache hit rate, graph growth over time) live in Grafana - see <code>observability/README.md</code>. This panel is this team's current snapshot only. For "where did one specific call's time actually go," see tracing (<code>ONBOARDING.md</code>'s "Watch it work") - browse traces in Jaeger once <code>OTEL_EXPORTER_OTLP_ENDPOINT</code> is set.</p>
+      <div id="missedAnchors" style="margin-top:12px"></div>
+      <p class="sub" style="margin-top:12px">Tokens avoided count only retrievals that returned a note. Empty results stay out of that total. Missed anchors below are phrases teammates searched that matched no approved title. Approve a pending note with that title, or log one, so the next search hits. Cross-team trends live in Grafana (<code>observability/README.md</code>). This panel is this team's current snapshot only.</p>
     </div>
 
     <div class="card">
@@ -321,6 +322,10 @@ async function loadMetrics(){
   try {
     const s = await api('/teams/' + conn.teamId + '/metrics/summary');
     const counts = s.node_counts || {};
+    const hits = s.retrieval_hits != null ? s.retrieval_hits : (s.total_retrievals || 0);
+    const misses = s.retrieval_misses || 0;
+    const decided = hits + misses;
+    const hitRate = decided ? Math.round(1000 * hits / decided) / 10 : null;
     const box = document.getElementById('metricsSummary');
     box.className = '';
     box.innerHTML = `
@@ -328,19 +333,30 @@ async function loadMetrics(){
         <div>Approved nodes: <b>${counts.approved || 0}</b></div>
         <div>Pending review: <b>${counts.pending || 0}</b></div>
         <div>Rejected: <b>${counts.rejected || 0}</b></div>
-        <div>Total retrievals: <b>${s.total_retrievals}</b></div>
+        <div>Retrievals that served a note: <b>${hits}</b></div>
+        <div>Empty retrievals: <b>${misses}</b></div>
+        <div>Hit rate: <b>${hitRate == null ? '—' : hitRate + '%'}</b></div>
         <div>Active users: <b>${s.active_users}</b></div>
         <div>Active auto-approve rules: <b>${s.active_auto_approve_rules}</b></div>
       </div>`;
     const top = document.getElementById('topReusedNodes');
     if (!s.top_reused_nodes || !s.top_reused_nodes.length){
       top.className = 'empty';
-      top.textContent = 'No retrievals logged yet - reuse data appears once teammates start calling retrieve_context.';
+      top.textContent = 'No note has been served yet. Reuse data appears once a retrieve_context call matches an approved title.';
+    } else {
+      top.className = '';
+      top.innerHTML = '<div class="sub" style="margin-bottom:6px">Most-reused memory (by distinct teammates served):</div><table><tr><th>Title</th><th>Distinct users</th><th>Retrievals</th></tr>' +
+        s.top_reused_nodes.map(n => `<tr><td>${escapeHtml(n.title)}</td><td>${n.distinct_users}</td><td>${n.access_count}</td></tr>`).join('') + '</table>';
+    }
+    const missed = document.getElementById('missedAnchors');
+    if (!s.top_missed_anchors || !s.top_missed_anchors.length){
+      missed.className = 'empty';
+      missed.textContent = 'No empty retrievals yet.';
       return;
     }
-    top.className = '';
-    top.innerHTML = '<div class="sub" style="margin-bottom:6px">Most-reused memory (by distinct teammates served):</div><table><tr><th>Title</th><th>Distinct users</th><th>Retrievals</th></tr>' +
-      s.top_reused_nodes.map(n => `<tr><td>${escapeHtml(n.title)}</td><td>${n.distinct_users}</td><td>${n.access_count}</td></tr>`).join('') + '</table>';
+    missed.className = '';
+    missed.innerHTML = '<div class="sub" style="margin-bottom:6px">Missed anchors (approve or log a note whose title contains these words):</div><table><tr><th>Anchor</th><th>Misses</th><th>Pending note that would match</th></tr>' +
+      s.top_missed_anchors.map(n => `<tr><td>${escapeHtml(n.anchor)}</td><td>${n.miss_count}</td><td>${n.pending_title ? escapeHtml(n.pending_title) : '—'}</td></tr>`).join('') + '</table>';
   } catch(e){ /* non-admin users can't see this; ignore */ }
 }
 
@@ -352,8 +368,12 @@ async function tryRetrieve(){
   try {
     const data = await api('/teams/' + conn.teamId + '/memory/retrieve?anchor=' + encodeURIComponent(anchor) + '&hops=' + hops + '&hub_cutoff=' + hubCutoff);
     const box = document.getElementById('retrieveResult');
-    box.innerHTML = `<div class="sub">${data.neighborhood_count} node(s), ~${data.approx_tokens} tokens (${data.reduction_pct}% smaller than the full team graph)</div>` +
-      data.neighborhood.map(n => `<div class="node"><div class="meta">${escapeHtml(n.title)} &middot; ${n.tier}</div><div class="body">${escapeHtml(n.body)}</div></div>`).join('');
+    if (!data.neighborhood_count){
+      box.innerHTML = '<div class="sub">No approved note matched. 0 tokens served.</div>';
+    } else {
+      box.innerHTML = `<div class="sub">${data.neighborhood_count} node(s), ~${data.approx_tokens} tokens (${data.reduction_pct}% smaller than the full team graph)</div>` +
+        data.neighborhood.map(n => `<div class="node"><div class="meta">${escapeHtml(n.title)} &middot; ${n.tier}</div><div class="body">${escapeHtml(n.body)}</div></div>`).join('');
+    }
     loadMetrics();
   } catch(e){ showStatus(e.message, 'err'); }
 }

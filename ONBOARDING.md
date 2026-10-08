@@ -279,7 +279,9 @@ A: Either no `retrieve_context` calls have happened yet, or no approved
 title matches the anchor. An exact title wins; otherwise retrieval uses
 overlapping title tokens (not the note body) and caps that neighborhood.
 A miss still returns an empty neighborhood, not an error - check
-`neighborhood_count` in the response.
+`neighborhood_count`. That call does not count as tokens avoided.
+The review UI's Metrics tab lists missed anchors, and a pending note
+whose title would have matched.
 
 **Q: I'm getting 429s almost immediately.**
 A: `AGENTHIVE_RATE_LIMIT_PER_MINUTE` (default 120) is shared across
