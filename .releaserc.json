@@ -12,6 +12,12 @@
       }
     ],
     [
+      "@semantic-release/exec",
+      {
+        "publishCmd": "bash hack/release-images.sh ${nextRelease.version}"
+      }
+    ],
+    [
       "semantic-release-helm3",
       {
         "chartPath": "./helm/agenthive",

@@ -86,9 +86,9 @@ PR.
   against the chart in `helm/agenthive/` (SQLite+1 replica or
   Postgres+N replicas, with Redis, Ingress/TLS, Prometheus scraping, and
   tracing all wired through chart values). Images publish to
-  `ghcr.io/polarpoint-io/agenthive` and the chart to
-  `oci://ghcr.io/polarpoint-io/charts` - both driven by conventional
-  commits on `main` via semantic-release, the same release pipeline used
+  `ghcr.io/polarpoint-io/agenthive` and then the chart to
+  `oci://ghcr.io/polarpoint-io/charts`, from one semantic-release version
+  on `main`, the same release pipeline used
   across the org (see `.github/workflows/`). `docker compose --profile
   jaeger up` gives you a trace-browsing web UI in one command.
 
@@ -421,7 +421,7 @@ flagged as gaps at some point and are closed now - see `ADR.md`.
 - `tests/` - pytest suite (unit + end-to-end against a real running server, incl. Redis, TLS, and tracing)
 - `Dockerfile`, `docker-compose.yml` - container packaging (SQLite, Postgres, Redis, Jaeger, and/or split-ui profiles)
 - `helm/agenthive/` - Kubernetes Helm chart (see its own README.md)
-- `.github/workflows/` - `ci.yml` (pytest against SQLite/Postgres/Redis), `chart.yml` (helm lint + render + validate), `images.yml` (build/push to GHCR), `release.yml` (semantic-release from conventional commits on `main`)
+- `.github/workflows/` - `ci.yml` (pytest against SQLite/Postgres/Redis), `chart.yml` (helm lint + render + validate), `images.yml` (pull-request image smoke test), `release.yml` (on `main`, semantic-release publishes the images and then the chart)
 - `Makefile`, `.releaserc.json`, `commitlint.config.js`, `package.json` - the same local build/release tooling used across polarpoint-io
 - `docs/diagrams/` - C4 Context/Container diagrams (PlantUML source + rendered SVG)
 - `static/hero.svg` - the banner at the top of this file, hand-authored in the same style as the org's other MCP-server repos (see e.g. polarpoint-io/holmesgpt-runbook-mcp's docs/hero.svg)

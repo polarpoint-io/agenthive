@@ -8,8 +8,8 @@ replicaCount: 1
 image:
   registry: ghcr.io
   repository: polarpoint-io/agenthive
-  # Defaults to .Chart.AppVersion if empty - the version this chart itself
-  # was released at, since the image and chart are built from the same tag.
+  # Defaults to .Chart.AppVersion if empty. release.yml publishes that
+  # image tag before the chart, in the same semantic-release run.
   tag: ""
   digest: ""
   pullPolicy: IfNotPresent
