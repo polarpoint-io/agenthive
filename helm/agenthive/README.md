@@ -12,7 +12,7 @@ open http://127.0.0.1:8790/ui
 This is the whole thing for a small team on a single cluster: one pod,
 one PVC, SQLite, and the chart's own default image
 (`ghcr.io/polarpoint-io/agenthive`, built and released alongside the
-chart - see `.github/workflows/release.yml`). `helm test
+chart - see `.github/workflows/build.yml`). `helm test
 agenthive` hits `/healthz` and `/readyz` to confirm it came up. Point at
 a different registry with `--set image.registry=... --set
 image.repository=...`.
@@ -163,7 +163,7 @@ helm upgrade agenthive helm/agenthive --reuse-values \
 This renders a second, independent Deployment/Service/Ingress
 (`templates/ui-*.yaml`) from `ghcr.io/polarpoint-io/agenthive-ui` (the
 image built from the repo root's `ui/Dockerfile`, same release cadence
-as the main image - see `.github/workflows/release.yml`). `ui.publicUrl`
+as the main image - see `.github/workflows/build.yml`). `ui.publicUrl`
 is what makes Azure AD sign-in and cross-origin API calls work once
 you've split it out this way - it sets the app's `AGENTHIVE_UI_URL` and
 `AGENTHIVE_CORS_ORIGIN` for you; see `../../README.md`'s "Splitting the

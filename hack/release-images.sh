@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Publish the release images for one semantic-release version.
-# release.yml calls this from .releaserc.json in the publish step, before
+# build.yml calls this from .releaserc.json in the publish step, before
 # semantic-release-helm3 pushes the chart, so the tag the chart references
 # already exists.
 set -euo pipefail
@@ -13,7 +13,7 @@ fi
 
 registry="${REGISTRY:-ghcr.io}"
 owner="${OWNER:-polarpoint-io}"
-# 1.7.1 -> 1.7. The floating minor tag matches images.yml's semver pattern.
+# 1.7.1 -> 1.7. The floating minor tag is published with the release.
 minor="${version%.*}"
 
 build() {

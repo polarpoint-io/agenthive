@@ -1,0 +1,246 @@
+name: build
+
+# One pipeline. Tests run first. The image is then smoke-tested and the
+# chart is linted, rendered, and packaged. On main, after both succeed,
+# semantic-release publishes the images and then the chart.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+permissions:
+  contents: read
+
+jobs:
+  test-sqlite:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -r requirements.txt
+      - run: pytest -v
+
+  test-postgres:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: agenthive
+          POSTGRES_PASSWORD: agenthive
+          POSTGRES_DB: agenthive
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -r requirements.txt
+      - name: Run end-to-end suite against Postgres
+        env:
+          DATABASE_URL: postgresql://agenthive:agenthive@localhost:5432/agenthive
+        run: pytest -v tests/test_end_to_end.py tests/test_auth.py tests/test_autoapprove.py tests/test_metrics_and_cache.py
+
+  test-redis:
+    runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -r requirements.txt
+      - name: Run the Redis-backed rate-limiter/cache suite
+        env:
+          REDIS_URL_FOR_TESTS: redis://localhost:6379/0
+        run: pytest -v tests/test_redis_backends.py
+
+  image:
+    needs: [test-sqlite, test-postgres, test-redis]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: agenthive
+            context: .
+            file: Dockerfile
+            host_port: "18790"
+            container_port: "8790"
+            path: /healthz
+            expect: ok
+          - name: agenthive-ui
+            context: ./ui
+            file: ui/Dockerfile
+            host_port: "18080"
+            container_port: "8080"
+            path: /
+            expect: AgentHive
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      # amd64 and load, so the smoke test can run the image. The multi-arch
+      # push is the release job, via hack/release-images.sh. A manifest list
+      # cannot be loaded into the local docker engine.
+      - name: Build the image
+        uses: docker/build-push-action@v7
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.file }}
+          platforms: linux/amd64
+          load: true
+          push: false
+          provenance: false
+          sbom: false
+          tags: local/${{ matrix.name }}:ci
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}
+
+      - name: Smoke test the image
+        run: |
+          set -euo pipefail
+          docker run -d --name smoke -p "${{ matrix.host_port }}:${{ matrix.container_port }}" "local/${{ matrix.name }}:ci"
+          for i in $(seq 1 30); do
+            curl -fsS "http://localhost:${{ matrix.host_port }}${{ matrix.path }}" && break || sleep 2
+          done
+          curl -fsS "http://localhost:${{ matrix.host_port }}${{ matrix.path }}" | grep -qi "${{ matrix.expect }}"
+          docker rm -f smoke
+
+  chart:
+    needs: [test-sqlite, test-postgres, test-redis]
+    runs-on: ubuntu-latest
+    env:
+      CHART: helm/agenthive
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: azure/setup-helm@v5
+        with:
+          version: v3.16.3
+
+      - name: Install kubeconform
+        run: |
+          curl -fsSL https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz \
+            | sudo tar xz -C /usr/local/bin kubeconform
+
+      - name: chart-testing (lint)
+        uses: helm/chart-testing-action@v2
+
+      - name: ct lint
+        run: |
+          ct lint --charts "$CHART" \
+                  --validate-maintainers=false \
+                  --check-version-increment=false
+
+      - name: Lint, render every scenario, check names
+        run: make check
+
+      - name: Render scenario files together, not just one at a time
+        run: |
+          set -euo pipefail
+          helm template combo "$CHART" \
+            -f "$CHART/values-postgres-example.yaml" \
+            -f "$CHART/ci/native-tls-values.yaml" \
+            -f "$CHART/ci/tracing-values.yaml" \
+            -f "$CHART/ci/azure-ad-values.yaml" \
+            | kubeconform -strict -summary -ignore-missing-schemas -kubernetes-version 1.31.0 -
+
+      - name: Reject Azure AD values the chart must refuse
+        run: |
+          set -uo pipefail
+          expect_failure() {
+            if helm template bad "$CHART" $1 >/dev/null 2>&1; then
+              echo "FAIL: expected '$1' to be rejected"
+              exit 1
+            fi
+            echo "OK: rejected $1"
+          }
+          expect_failure "--set auth.azureAd.enabled=true"
+          expect_failure "--set auth.azureAd.enabled=true --set auth.azureAd.tenantId=t --set auth.azureAd.clientId=c --set auth.azureAd.redirectUri=https://x/auth/azure/callback"
+
+      - name: Package the chart
+        run: make package
+
+  release:
+    needs: [image, chart]
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+      id-token: write
+      # semantic-release-helm3 pushes the packaged chart to GHCR as an OCI
+      # artifact. Without packages:write the helm push gets a 403.
+      packages: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # semantic-release reads the whole tag history to work out the last
+          # release; a shallow clone makes every run look like the first.
+          fetch-depth: 0
+          persist-credentials: false
+          token: ${{ secrets.POL_GH_TOKEN }}
+
+      - uses: azure/setup-helm@v5
+        with:
+          version: v3.16.3
+
+      - name: Log in to GHCR
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" \
+            | helm registry login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Log in to GHCR for image pushes
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Semantic Release
+        uses: cycjimmy/semantic-release-action@v4
+        with:
+          extra_plugins: "semantic-release-helm3 @semantic-release/exec @semantic-release/changelog @semantic-release/git"
+        env:
+          # A PAT rather than the workflow GITHUB_TOKEN so the release commit
+          # and tag can be pushed under branch protection. hack/release-images.sh
+          # publishes the images in this job, before the chart. The release
+          # commit message still carries [skip ci] so that push does not
+          # start a second build.
+          GH_TOKEN: ${{ secrets.POL_GH_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.POL_GH_TOKEN }}

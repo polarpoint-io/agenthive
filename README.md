@@ -295,8 +295,8 @@ The suite spins up a real `server.py` per test ("test against a running
 server, not mocks"), against an
 isolated SQLite file by default. Set `DATABASE_URL` to also exercise the
 Postgres backend, and `REDIS_URL_FOR_TESTS` for the Redis-backed rate
-limiter/cache tests (CI runs all three - see `.github/workflows/ci.yml`,
-which also `helm lint`s and `helm template`s the chart).
+limiter/cache tests (`.github/workflows/build.yml` runs all three, then
+smoke-tests the images and packages the chart).
 
 `tests/test_retrieval_unit.py` proves the traversal algorithm in
 isolation. `test_end_to_end.py`, `test_auth.py`, `test_autoapprove.py`,
@@ -421,7 +421,7 @@ flagged as gaps at some point and are closed now - see `ADR.md`.
 - `tests/` - pytest suite (unit + end-to-end against a real running server, incl. Redis, TLS, and tracing)
 - `Dockerfile`, `docker-compose.yml` - container packaging (SQLite, Postgres, Redis, Jaeger, and/or split-ui profiles)
 - `helm/agenthive/` - Kubernetes Helm chart (see its own README.md)
-- `.github/workflows/` - `ci.yml` (pytest against SQLite/Postgres/Redis), `chart.yml` (helm lint + render + validate), `images.yml` (pull-request image smoke test), `release.yml` (on `main`, semantic-release publishes the images and then the chart)
+- `.github/workflows/build.yml` - test, smoke-test the images, package the chart, and on `main` publish the images then the chart
 - `Makefile`, `.releaserc.json`, `commitlint.config.js`, `package.json` - the same local build/release tooling used across polarpoint-io
 - `docs/diagrams/` - C4 Context/Container diagrams (PlantUML source + rendered SVG)
 - `static/hero.svg` - the banner at the top of this file, hand-authored in the same style as the org's other MCP-server repos (see e.g. polarpoint-io/holmesgpt-runbook-mcp's docs/hero.svg)
