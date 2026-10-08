@@ -1,3 +1,10 @@
+# [1.8.0](https://github.com/polarpoint-io/agenthive/compare/v1.7.1...v1.8.0) (2026-10-08)
+
+
+### Features
+
+* update README with node status and MCP details ([667571e](https://github.com/polarpoint-io/agenthive/commit/667571eac7f5879facde487fe5adf2f61c3537ca))
+
 ## [1.7.1](https://github.com/polarpoint-io/agenthive/compare/v1.7.0...v1.7.1) (2026-10-08)
 
 

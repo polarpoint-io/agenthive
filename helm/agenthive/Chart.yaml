@@ -8,8 +8,8 @@ type: application
 # Written by semantic-release from the conventional commits on main; do not
 # edit by hand. appVersion is the image tag. build.yml publishes that
 # image before this chart is pushed.
-version: 1.7.1
-appVersion: "1.7.1"
+version: 1.8.0
+appVersion: "1.8.0"
 
 kubeVersion: ">=1.25.0-0"
 
