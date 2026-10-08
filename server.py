@@ -688,6 +688,10 @@ class Handler(BaseHTTPRequestHandler):
             with tracing.TRACER.start_as_current_span("access_log.record") as span:
                 span.set_attribute("agenthive.node_count", len(node_ids))
                 STORE.record_access(team_id, node_ids, user["id"])
+        else:
+            with tracing.TRACER.start_as_current_span("access_log.record_miss") as span:
+                span.set_attribute("agenthive.anchor", anchor)
+                STORE.record_retrieval_miss(team_id, anchor, user["id"])
         metrics.record_retrieval(result, cache_status, cross_user)
 
         self._send(200, result)

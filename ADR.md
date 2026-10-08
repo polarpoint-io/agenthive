@@ -234,11 +234,14 @@ rather than requiring a fresh database. See `db.py`.
   team_id or user_id labels (unbounded cardinality on a metrics endpoint
   is its own incident waiting to happen). Headline series:
   `agenthive_tokens_avoided_total` (the running sum of full-team tokens
-  minus what was actually returned, across every retrieval - read it as
+  minus what was actually returned, only when the retrieval returned a
+  note - an empty result is a miss and adds nothing; read it as
   "tokens not sent because retrieval was scoped," not as a real LLM
   billing number, since this service never calls a model - see
   `observability/README.md`'s "what's actually measured" section for the
-  full honesty pass on this), `agenthive_cache_hits_total` /
+  full honesty pass on this), `agenthive_retrieval_hits_total` /
+  `agenthive_retrieval_empty_total` (did the anchor match an approved
+  title), `agenthive_cache_hits_total` /
   `agenthive_cross_user_cache_hits_total` (shared-reuse evidence), and
   DB-backed gauges (`agenthive_memory_nodes`, `agenthive_active_users`,
   `agenthive_teams`) computed fresh at scrape time via a custom collector
@@ -246,7 +249,10 @@ rather than requiring a fresh database. See `db.py`.
   reused across the most teammates, this team's retrieval count) lives in
   `GET /teams/{id}/metrics/summary` instead, backed by a
   `memory_access_log` table (`db.py`) - one row per (retrieval, node,
-  user). "How this improves over time" is answered by graphing these in
+  user). Repeated empty anchors for that team are aggregated in
+  `retrieval_misses` and returned as `top_missed_anchors`, with a
+  pending title when approving it would make the next search hit.
+  "How this improves over time" is answered by graphing these in
   Grafana (`observability/grafana-dashboard.json`), not by a number this
   service computes for you.
 - **Distributed tracing (`tracing.py`).** Off by default -

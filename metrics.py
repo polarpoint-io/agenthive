@@ -9,8 +9,10 @@ make both claims checkable over time in Grafana instead of asserted in a
 README:
 
 - agenthive_tokens_avoided_total is the headline number: the running sum
-  of (full-team tokens - what was actually returned) across every
-  retrieval. Graph it as a rate() and it climbs with usage.
+  of (full-team tokens - what was actually returned) across retrievals
+  that returned at least one note. An empty result is a miss: nothing
+  was served, so nothing was avoided. Graph the hit counter as a rate()
+  and it climbs with usage that actually returned memory.
 - agenthive_cache_hits_total / agenthive_cross_user_cache_hits_total show
   the graph being used as SHARED memory: a hit is one fewer traversal;
   a cross-user hit is proof a different teammate benefited from context
@@ -63,14 +65,26 @@ TOKENS_SERVED = Counter(
 )
 TOKENS_AVOIDED = Counter(
     "agenthive_tokens_avoided_total",
-    "Approx tokens NOT sent - the gap between a full-team dump and the "
-    "bounded neighborhood actually returned, summed across all retrievals",
+    "Approx tokens NOT sent when a retrieval returned at least one note: "
+    "full-team tokens minus the bounded neighborhood. Empty retrievals "
+    "do not increment this.",
     registry=REGISTRY,
 )
 REDUCTION_PCT = Histogram(
     "agenthive_retrieval_reduction_pct",
-    "Per-retrieval percentage reduction vs. a full-team dump",
+    "Percentage reduction vs. a full-team dump, observed only when the "
+    "retrieval returned at least one note",
     buckets=(0, 10, 25, 50, 75, 90, 95, 99, 100), registry=REGISTRY,
+)
+RETRIEVAL_HITS = Counter(
+    "agenthive_retrieval_hits_total",
+    "retrieve_context calls that returned at least one note",
+    registry=REGISTRY,
+)
+RETRIEVAL_EMPTY = Counter(
+    "agenthive_retrieval_empty_total",
+    "retrieve_context calls that matched no approved note",
+    registry=REGISTRY,
 )
 
 CACHE_HITS = Counter("agenthive_cache_hits_total", "Retrieval cache hits", registry=REGISTRY)
@@ -137,12 +151,21 @@ def record_review(approved: bool):
 
 
 def record_retrieval(result: dict, cache_status: str, cross_user: bool):
-    """cache_status: 'hit' | 'miss' | 'disabled'."""
+    """cache_status: 'hit' | 'miss' | 'disabled'.
+
+    Token avoidance is counted only when a note was returned. An empty
+    neighborhood did not spare the caller a full-graph dump; it spared
+    them nothing, because there was nothing to fold into context."""
     RETRIEVALS.inc()
-    TOKENS_SERVED.inc(result.get("approx_tokens", 0))
-    avoided = max(result.get("approx_tokens_full_team", 0) - result.get("approx_tokens", 0), 0)
-    TOKENS_AVOIDED.inc(avoided)
-    REDUCTION_PCT.observe(result.get("reduction_pct", 0) or 0)
+    served = result.get("approx_tokens", 0) or 0
+    TOKENS_SERVED.inc(served)
+    if (result.get("neighborhood_count") or 0) > 0:
+        RETRIEVAL_HITS.inc()
+        avoided = max((result.get("approx_tokens_full_team", 0) or 0) - served, 0)
+        TOKENS_AVOIDED.inc(avoided)
+        REDUCTION_PCT.observe(result.get("reduction_pct", 0) or 0)
+    else:
+        RETRIEVAL_EMPTY.inc()
     if cache_status == "hit":
         CACHE_HITS.inc()
         if cross_user:
