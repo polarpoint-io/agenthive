@@ -1,3 +1,11 @@
+## [1.7.1](https://github.com/polarpoint-io/agenthive/compare/v1.7.0...v1.7.1) (2026-10-08)
+
+
+### Bug Fixes
+
+* **ci:** load a single platform on pull request image builds ([d58e3b3](https://github.com/polarpoint-io/agenthive/commit/d58e3b31d195fc868e21b46f79e24c5108028928))
+* **ci:** load a single platform on pull request image builds ([06538ca](https://github.com/polarpoint-io/agenthive/commit/06538caad2f1fb973979fdb45531f3fdf2296cae))
+
 # [1.7.0](https://github.com/polarpoint-io/agenthive/compare/v1.6.1...v1.7.0) (2026-10-07)
 
 
