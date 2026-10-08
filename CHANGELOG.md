@@ -1,3 +1,11 @@
+# [1.9.0](https://github.com/polarpoint-io/agenthive/compare/v1.8.0...v1.9.0) (2026-10-08)
+
+
+### Features
+
+* **metrics:** count token savings only when a note is served ([84c81c1](https://github.com/polarpoint-io/agenthive/commit/84c81c14000016735a8f29012c8394e1c19fe2d4))
+* **metrics:** count token savings only when a note is served ([610317f](https://github.com/polarpoint-io/agenthive/commit/610317f7c57e0f5c6e75e220f4976824506f19d8))
+
 # [1.8.0](https://github.com/polarpoint-io/agenthive/compare/v1.7.1...v1.8.0) (2026-10-08)
 
 
