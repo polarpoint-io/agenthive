@@ -1,7 +1,9 @@
 name: images
 
-# Builds the AgentHive images and pushes them to GHCR under this
-# repository's owner:
+# Smoke-tests the AgentHive images on pull requests, and can republish
+# them when dispatched by hand. A merge to main publishes them from
+# release.yml instead, tagged with the semantic-release version, before
+# the chart. Images:
 #
 #   ghcr.io/polarpoint-io/agenthive     - the API server (Dockerfile)
 #   ghcr.io/polarpoint-io/agenthive-ui  - the standalone review UI
@@ -11,13 +13,10 @@ name: images
 #                                          which expects this to exist.
 
 on:
-  push:
-    # Tags only. semantic-release tags every release on main, so building
-    # on branch pushes as well would build this image twice for each one.
-    # No `paths:` filter either: GitHub applies those to tag pushes too,
-    # and a release commit touches Chart.yaml rather than the app source,
-    # which would silently skip the very build the tag exists to trigger.
-    tags: ["v*"]
+  # Release images are published from release.yml, inside semantic-release,
+  # before the chart. This workflow only smoke-tests pull requests and
+  # rebuilds when someone dispatches it (pick the vX.Y.Z tag to republish
+  # that version).
   pull_request:
     paths:
       - "**.py"
@@ -64,14 +63,14 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/agenthive
           tags: |
-            # The v<version> tag semantic-release created; this is what the
-            # chart of the same version defaults its image tag to.
+            # Present when this workflow is dispatched on a vX.Y.Z tag.
+            # A normal release publishes this tag from release.yml instead.
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=ref,event=pr
             type=sha,format=long
-            # Releases are the only thing built here now, so every one of them
-            # is the latest.
+            # A dispatch on a release tag also moves latest. A pull request
+            # does not.
             type=raw,value=latest,enable=${{ github.ref_type == 'tag' }}
           labels: |
             org.opencontainers.image.title=AgentHive
@@ -149,13 +148,14 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/agenthive-ui
           tags: |
-            # The v<version> tag semantic-release created; this is what the
-            # chart's ui.image.tag defaults to (same version as the API
-            # image and the chart itself - see images.yml's own job above).
+            # Present when this workflow is dispatched on a vX.Y.Z tag.
+            # A normal release publishes this tag from release.yml instead.
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=ref,event=pr
             type=sha,format=long
+            # A dispatch on a release tag also moves latest. A pull request
+            # does not.
             type=raw,value=latest,enable=${{ github.ref_type == 'tag' }}
           labels: |
             org.opencontainers.image.title=AgentHive UI

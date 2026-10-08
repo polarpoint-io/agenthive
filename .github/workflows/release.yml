@@ -1,9 +1,10 @@
 name: release
 
-# Semantic release, the same shape the rest of the estate uses: conventional
-# commits on main decide the version, semantic-release-helm3 writes it into
-# Chart.yaml and pushes the packaged chart to GHCR, and the resulting
-# v<version> tag is what builds the image.
+# Semantic release on every push to main. Conventional commits decide the
+# version. The publish step pushes the Docker images for that version
+# first (hack/release-images.sh), then semantic-release-helm3 packages and
+# pushes the chart. The image therefore exists before the chart that
+# references it. A later tag push does not build the image again.
 
 on:
   push:
@@ -67,20 +68,37 @@ jobs:
         with:
           version: v3.16.3
 
-      # semantic-release-helm3 shells out to `helm push`, so the registry has
-      # to be logged in before the plugin runs.
+      # semantic-release-helm3 shells out to `helm push`, and
+      # hack/release-images.sh shells out to `docker buildx`. Both need a
+      # GHCR login before the plugin runs. packages:write on this job is
+      # what makes the default token able to push.
       - name: Log in to GHCR
         run: |
           echo "${{ secrets.GITHUB_TOKEN }}" \
             | helm registry login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Log in to GHCR for image pushes
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Semantic Release
         uses: cycjimmy/semantic-release-action@v4
         with:
           extra_plugins: "semantic-release-helm3 @semantic-release/exec @semantic-release/changelog @semantic-release/git"
         env:
-          # A PAT rather than GITHUB_TOKEN on purpose: pushes made with
-          # GITHUB_TOKEN do not trigger workflows, so the v<version> tag would
-          # land and the image would never build.
+          # A PAT rather than the workflow GITHUB_TOKEN so the release commit
+          # and tag can be pushed under branch protection. The image build
+          # does not depend on that tag: it runs in this job, before the
+          # chart publish. The release commit message still carries
+          # [skip ci] so the tag push does not start a second release.
           GH_TOKEN: ${{ secrets.POL_GH_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.POL_GH_TOKEN }}

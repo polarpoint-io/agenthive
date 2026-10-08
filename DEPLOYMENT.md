@@ -8,8 +8,8 @@ helm install agenthive helm/agenthive
 
 The chart defaults to the published image
 (`ghcr.io/polarpoint-io/agenthive`) at the chart's own `appVersion` - image
-and chart are built and released together, see
-`.github/workflows/release.yml` and `images.yml`. Point at a different
+and chart are released together: `release.yml` publishes the image,
+then the chart, from the same semantic-release version. Point at a different
 registry (an internal mirror, say) with `--set image.registry=... --set
 image.repository=...`.
 

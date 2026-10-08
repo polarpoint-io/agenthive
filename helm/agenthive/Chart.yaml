@@ -6,9 +6,8 @@ description: A shared, reviewed memory graph for a team of coding agents (SQLite
 type: application
 
 # Written by semantic-release from the conventional commits on main; do not
-# edit by hand. This is also the tag of the image this chart defaults to,
-# because it's built from the same release (see .github/workflows/release.yml
-# and images.yml).
+# edit by hand. appVersion is the image tag. release.yml publishes that
+# image before this chart is pushed.
 version: 1.7.1
 appVersion: "1.7.1"
 
