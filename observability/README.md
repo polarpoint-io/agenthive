@@ -131,3 +131,42 @@ row per (retrieval, node, user), which is also what
 side. Empty retrievals are aggregated in `retrieval_misses` (one row per
 normalised anchor) and returned as `retrieval_misses` /
 `top_missed_anchors`, including a pending title that would have matched.
+
+
+## Progressive disclosure: what the index/fetch counters do and don't claim
+
+`mode=index` returns titles instead of bodies, so the response really is
+small. It would be easy - and wrong - to let that inflate
+`agenthive_tokens_avoided_total`: the number would jump the moment a
+caller switched mode, and jump again in the same direction when it
+fetched the bodies back. A caller that fetches every id has saved
+nothing and spent an extra round trip.
+
+So avoidance stays defined against the full neighborhood regardless of
+mode, and the index/fetch pair is tracked separately:
+
+| Metric | Meaning |
+|---|---|
+| `agenthive_index_tokens_withheld_total` | Body tokens not sent because the caller asked for the index. **Gross, not net.** |
+| `agenthive_fetch_tokens_served_total` | Tokens returned by `/memory/fetch` - the half that costs. |
+| `agenthive_retrievals_by_mode_total{mode}` | `full` vs `index`, so adoption is visible. |
+| `agenthive_fetch_nodes_total{outcome}` | `served` vs `missing`. A rising `missing` means callers are holding stale ids. |
+
+The real saving is the difference. In Grafana:
+
+```promql
+increase(agenthive_index_tokens_withheld_total[24h])
+  - increase(agenthive_fetch_tokens_served_total[24h])
+```
+
+If that trends toward zero, progressive disclosure is costing a round
+trip and buying nothing - agents are fetching everything they index, and
+they should go back to `retrieve_context`. That is a real possible
+outcome and the dashboard should be able to say so.
+
+## Governance counters
+
+| Metric | Meaning |
+|---|---|
+| `agenthive_private_blocks_stripped_total` | `<private>` blocks removed before storage. Never zero-by-design: zero means nobody is using the marker, not that nothing was sensitive. |
+| `agenthive_auto_approve_blocked_total` | Writes that matched an auto-approve rule but were held for review anyway because of a reserved tag. A steady rate here means a rule is too broad. |

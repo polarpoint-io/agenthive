@@ -47,6 +47,7 @@ by a successful Azure AD sign-in - see oidc.py>  (see auth.py):
   POST /teams/{team_id}/memory/{id}/approve  [admin]
   POST /teams/{team_id}/memory/{id}/reject   [admin]
   GET  /teams/{team_id}/memory/retrieve      [member]   retrieve_context read path
+  POST /teams/{team_id}/memory/fetch         [member]   bodies for ids from an index retrieval
 
   POST   /teams/{team_id}/auto-approve-rules      [admin]
   GET    /teams/{team_id}/auto-approve-rules      [admin]
@@ -90,7 +91,8 @@ from auth import RATE_LIMITER, AuthError, require_role
 from cache import CACHE
 from config import CONFIG
 from db import Store
-from retrieval import retrieve
+import governance
+from retrieval import filter_by_tags, project_index, retrieve, select_nodes
 
 STORE: Store = None  # set in main() / create_app()
 UI_HTML: str = None  # loaded lazily from ui/index.html
@@ -179,6 +181,7 @@ ROUTES = [
     (re.compile(r"^/teams/(?P<team_id>[\w-]+)/memory/(?P<node_id>[\w-]+)/approve$"), "POST", "approve", "admin"),
     (re.compile(r"^/teams/(?P<team_id>[\w-]+)/memory/(?P<node_id>[\w-]+)/reject$"), "POST", "reject", "admin"),
     (re.compile(r"^/teams/(?P<team_id>[\w-]+)/memory/retrieve$"), "GET", "retrieve_endpoint", "member"),
+    (re.compile(r"^/teams/(?P<team_id>[\w-]+)/memory/fetch$"), "POST", "fetch_endpoint", "member"),
 
     (re.compile(r"^/teams/(?P<team_id>[\w-]+)/auto-approve-rules$"), "POST", "create_rule", "admin"),
     (re.compile(r"^/teams/(?P<team_id>[\w-]+)/auto-approve-rules$"), "GET", "list_rules", "admin"),
@@ -590,11 +593,22 @@ class Handler(BaseHTTPRequestHandler):
         body = self._body()
         if not body.get("title") or not body.get("body"):
             raise ValueError("title and body are required")
+
+        # Before storage, not before review. The approval gate still sees
+        # everything that survives this; what it will never see is a secret
+        # the author already marked as not-for-sharing. Title is stripped
+        # too - it is the one field the review queue renders in full.
+        clean_title, t_stripped = governance.strip_private(body["title"])
+        clean_body, b_stripped = governance.strip_private(body["body"])
+        stripped = t_stripped + b_stripped
+        metrics.record_private_stripped(stripped)
+
         with tracing.TRACER.start_as_current_span("memory.write") as span:
+            span.set_attribute("agenthive.private_blocks_stripped", stripped)
             node = STORE.create_memory(
                 team_id=params["team_id"],
-                title=body["title"],
-                body=body["body"],
+                title=clean_title,
+                body=clean_body,
                 agent_id=body.get("agent_id"),
                 task_id=body.get("task_id"),
                 tier=body.get("tier", "L1"),
@@ -604,6 +618,9 @@ class Handler(BaseHTTPRequestHandler):
             span.set_attribute("agenthive.memory_node_id", node["id"])
             span.set_attribute("agenthive.status", node["status"])
             span.set_attribute("agenthive.auto_approved", bool(node.get("auto_approved")))
+            if getattr(STORE, "last_auto_approve_blocked", False):
+                span.set_attribute("agenthive.auto_approve_blocked", True)
+                metrics.record_auto_approve_blocked()
         metrics.record_write(auto_approved=bool(node.get("auto_approved")))
         if node["status"] == "approved" and CACHE is not None:
             with tracing.TRACER.start_as_current_span("cache.invalidate_team"):
@@ -654,6 +671,15 @@ class Handler(BaseHTTPRequestHandler):
         hub_cutoff = int((query.get("hub_cutoff") or [15])[0])
         team_id = params["team_id"]
 
+        # Default "full" keeps every existing caller - the MCP server, the
+        # review UI, client.py, anyone's .cursor/rules - returning exactly
+        # the bytes they returned before this route learned a second mode.
+        mode = ((query.get("mode") or ["full"])[0] or "full").lower()
+        if mode not in ("full", "index"):
+            raise ValueError("mode must be 'full' or 'index'")
+        tag_filter = [t for t in (query.get("tags") or [None])[0].split(",")] \
+            if (query.get("tags") or [None])[0] else []
+
         cache_status = "disabled"
         cross_user = False
         result = None
@@ -683,16 +709,62 @@ class Handler(BaseHTTPRequestHandler):
                     CACHE.set(team_id, anchor, hops, hub_cutoff, result, user["id"])
                 cache_status = "miss"
 
+        # Everything above this line is mode-independent on purpose: the
+        # cache holds the full result, so an index call and a full call for
+        # the same anchor share one entry - and a cross-user hit still
+        # counts as one. Splitting the cache by mode would have halved the
+        # reuse figure that evidences shared memory.
+        if tag_filter:
+            result = filter_by_tags(result, tag_filter)
+
         node_ids = [n["id"] for n in result["neighborhood"]]
         if node_ids:
             with tracing.TRACER.start_as_current_span("access_log.record") as span:
                 span.set_attribute("agenthive.node_count", len(node_ids))
+                # Logged on the INDEX call, not deferred to the fetch. The
+                # titles were disclosed here; that is the access.
                 STORE.record_access(team_id, node_ids, user["id"])
         else:
             with tracing.TRACER.start_as_current_span("access_log.record_miss") as span:
                 span.set_attribute("agenthive.anchor", anchor)
                 STORE.record_retrieval_miss(team_id, anchor, user["id"])
-        metrics.record_retrieval(result, cache_status, cross_user)
+
+        payload = project_index(result) if mode == "index" else result
+        metrics.record_retrieval(payload, cache_status, cross_user, mode=mode)
+
+        self._send(200, payload)
+        return 200
+
+    def h_fetch_endpoint(self, params, query, user):
+        """Layer 3 of progressive disclosure: bodies for ids the caller
+        already saw in an index retrieval.
+
+        Reads from STORE.approved_nodes(team_id) - the same team-scoped,
+        approved-only list retrieval walks - rather than looking each id up
+        directly, so an id from another team or a rejected node is simply
+        absent instead of being a permission check that could be got
+        wrong. See retrieval.select_nodes."""
+        body = self._body()
+        ids = body.get("ids")
+        if not isinstance(ids, list) or not ids:
+            raise ValueError("ids must be a non-empty list of node ids")
+        if len(ids) > 100:
+            raise ValueError("at most 100 ids per fetch")
+        team_id = params["team_id"]
+
+        with tracing.TRACER.start_as_current_span("retrieval.fetch") as span:
+            span.set_attribute("agenthive.requested_count", len(ids))
+            approved = STORE.approved_nodes(team_id)
+            result = select_nodes(approved, ids)
+            span.set_attribute("agenthive.node_count", result["node_count"])
+            span.set_attribute("agenthive.missing_count", len(result["missing"]))
+            span.set_attribute("agenthive.approx_tokens", result["approx_tokens"])
+
+        served_ids = [n["id"] for n in result["nodes"]]
+        if served_ids:
+            with tracing.TRACER.start_as_current_span("access_log.record"):
+                STORE.record_access(team_id, served_ids, user["id"])
+        metrics.record_fetch(result)
 
         self._send(200, result)
         return 200
