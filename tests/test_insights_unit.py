@@ -7,6 +7,15 @@ arithmetic: when a proposal is NOT made is the behaviour worth pinning,
 because a suggestion engine that fires on thin evidence trains people to
 ignore it.
 """
+import os
+import sys
+
+# Same as test_retrieval_unit.py: a unit test imports the module under
+# test directly, and pytest only puts tests/ on sys.path - not the repo
+# root. `python -m pytest` happens to add the CWD and hides this; CI runs
+# bare `pytest`, which does not.
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 import insights
 
 
