@@ -1,0 +1,53 @@
+@startuml
+' How use becomes improvement. Every arrow out of "Proposals" stops at
+' a human - that is the design, not a limitation.
+skinparam backgroundColor transparent
+skinparam shadowing false
+skinparam defaultFontName Helvetica
+skinparam ArrowColor #555555
+skinparam rectangle {
+  BorderColor #888888
+  BackgroundColor #F5F5F5
+}
+
+title How the graph improves itself - and where it stops
+
+rectangle "**Use**" as use #E6F1FB {
+  rectangle "Retrievals served\n(access log, shared retrieval ids)" as acc
+  rectangle "Retrievals that found nothing\n(miss log, counted per anchor)" as miss
+  rectangle "Approve / reject decisions\n(labelled, free, nobody else has these)" as rev
+}
+
+rectangle "**Proposals**\n//arithmetic over rows - no model//" as prop #FAEEDA {
+  rectangle "Links the graph is missing\n(co-retrieved, not linked)" as links
+  rectangle "Tier promotions and demotions\n(by distinct users, not repeat hits)" as tiers
+  rectangle "Gaps worth filling\n(and which are already in the queue)" as gaps
+  rectangle "Auto-approve rules your own\ndecisions already justify" as rules
+}
+
+rectangle "**A human decides**" as human #E1F5EE
+rectangle "**An agent writes the note**" as agentw #E1F5EE
+
+rectangle "Better graph\n→ more exact anchors\n→ fewer wasted retrievals" as better #EAF3DE
+
+acc --> links
+acc --> tiers
+miss --> gaps
+rev --> rules
+
+links --> human
+tiers --> human
+rules --> human
+gaps --> agentw : report_gaps\n[member]
+
+human --> better
+agentw --> better
+better --> use : and the cycle\nmeasures itself\n(gaps_closed_total)
+
+note bottom of prop
+  Nothing here applies itself. Poison what gets consolidated and you
+  poison every future retrieval, so the approval gate is the defence -
+  a proposal that applied itself would route around it.
+end note
+
+@enduml

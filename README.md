@@ -109,6 +109,42 @@ PR.
   across the org (see `.github/workflows/`). `docker compose --profile
   jaeger up` gives you a trace-browsing web UI in one command.
 
+## Where the savings actually come from
+
+Four mechanisms, each with the metric that proves it and the case where
+it does not help. There is a slide deck covering this in
+[`docs/deck/`](docs/deck/) (`make html`), and the two flows below are
+drawn in [`docs/diagrams/`](docs/diagrams/).
+
+![Progressive disclosure](docs/diagrams/retrieval-disclosure.svg)
+
+| Mechanism | Saves | Proven by | Does nothing when |
+|---|---|---|---|
+| Bounded traversal | Sending a whole team's history to answer one question | `tokens_avoided_total` | The anchor matches nothing — then it saved you nothing and cost a round trip |
+| Progressive disclosure | The bodies an agent would have skipped | `index_tokens_withheld` − `fetch_tokens_served` | The agent fetches everything it indexed |
+| Shared retrieval cache | A second teammate re-walking the same graph | `cross_user_cache_hits_total` | One person works alone |
+| Gap reporting + the backstop hook | Rediscovering what a teammate already learned | `gaps_closed_total` | Nobody reads the queue, so nothing gets approved |
+
+The right-hand column is the point. Every one of these has a case where
+it is neutral or slightly negative, and the metrics are built to show
+that rather than hide it — see
+[`observability/README.md`](observability/README.md), which carries the
+queries for each failure shape.
+
+### The expensive failure is a miss, not a big response
+
+Tokens are the visible cost. A retrieval that returns **nothing** costs
+more: a round trip, then the work done from scratch, then frequently a
+note logged that duplicates one already in the graph under a different
+title. Three costs from one failed lookup.
+
+`report_gaps` and `agenthive_anchor_resolution_total` exist to make that
+countable. A rising `fallback` share means titles no longer match how
+people phrase things, which is a naming problem that no amount of `hops`
+or `hub_cutoff` tuning will fix.
+
+![The improvement loop](docs/diagrams/improvement-loop.svg)
+
 ## Running it
 
 ```bash
