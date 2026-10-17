@@ -726,12 +726,34 @@ class Store:
     def find_approved_duplicate(self, team_id: str, title: str, body: str):
         """An approved node with identical title AND body.
 
-        Compared in Python rather than SQL so normalisation matches
-        governance.normalise_for_duplicate exactly - a LOWER()/TRIM()
-        pair would drift from it the first time either changes, and the
-        two disagreeing is how a duplicate check silently stops working."""
+        Narrowed in SQL, decided in Python. The first version loaded and
+        normalised EVERY approved node on EVERY write, which is an O(n)
+        scan with full body hydration on the hot write path - it roughly
+        doubled the test suite's runtime before anybody noticed, and on a
+        real graph it would have been far worse.
+
+        SQL only filters by normalised title, which it can do exactly:
+        governance normalises a title with .strip().lower(), and
+        LOWER(TRIM(title)) is the same operation on both backends. The
+        authoritative comparison, including the body's whitespace
+        collapsing, still happens in Python against the handful of rows
+        that survive - so the two cannot drift apart on the part that is
+        actually subtle.
+
+        idx_memory_team_title already covers (team_id, title), so this is
+        an index lookup rather than the scan it replaced."""
+        title_key = (title or "").strip().lower()
+        if not title_key:
+            return None
+
+        rows = self.backend.query_all(
+            "SELECT * FROM memory_nodes "
+            "WHERE team_id = ? AND status = 'approved' AND LOWER(TRIM(title)) = ?",
+            (team_id, title_key),
+        )
         key = governance.normalise_for_duplicate(title, body)
-        for node in self.approved_nodes(team_id):
+        for row in rows:
+            node = _row_to_node(row)
             if governance.normalise_for_duplicate(node["title"], node["body"]) == key:
                 return node
         return None
