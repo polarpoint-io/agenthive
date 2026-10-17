@@ -46,9 +46,26 @@ PR.
   graph outward from an anchor note (hub-cutoff traversal), returning a
   bounded neighborhood and its approximate token count. Nothing is
   injected automatically.
+- **Disclosed in layers, not all at once:** the bounded neighborhood is
+  still every body in it, including the ones a session would have
+  skipped had it seen the titles first. `mode=index` returns the same
+  traversal with bodies withheld - ids, titles, tiers, tags and a
+  per-node token cost - and `POST /memory/fetch` returns only the bodies
+  actually wanted. See "Progressive disclosure" below for when this is
+  and is not a good trade.
 - **Two calls, not every call:** an agent session calls `retrieve_context`
   once at the start and `log_session` once at the end. There is no proxy
   sitting in front of your LLM traffic.
+- **A backstop for the sessions that never call either:** `log_session`
+  runs only when the agent chooses to call it, and the sessions most
+  worth recording are the ones that crashed, hit a context limit, or
+  ended when someone closed the terminal. A harness lifecycle hook fires
+  regardless and records that a session went unsummarised, so the gap is
+  visible in the review queue instead of silent. It is a backstop, not a
+  second writer - when the agent logged properly, the hook writes
+  nothing. See
+  [agenthive-mcp](https://github.com/polarpoint-io/agenthive-mcp)'s
+  `agenthive-log`.
 - **SQLite or Postgres:** SQLite by default (zero setup); set
   `DATABASE_URL` to a `postgresql://` URL to run against Postgres once
   you need concurrent writers at real volume. Same schema, same code
@@ -170,6 +187,89 @@ That MCP server lives in its own repo,
 local wrapper with its own dependency and release cadence, unrelated to
 this service's own container image, Helm chart, or CI matrix. See that
 repo's README for setup.
+
+## Progressive disclosure
+
+`retrieve_context` answers "what is near this anchor, and here is all of
+it" in one round trip. That is the right default, and it stays the
+default. But it bills the caller for every body in the neighborhood,
+including the ones they would have skipped given the titles first.
+
+Two extra layers, for when that matters:
+
+```python
+index = client.retrieve_index("Postgres connection pool exhaustion")
+for node in index["neighborhood"]:
+    print(node["id"], node["title"], node["tags"], node["approx_tokens"])
+
+# Then pay only for what's worth reading. One call, not one per id.
+bodies = client.fetch_nodes([index["neighborhood"][0]["id"]])
+```
+
+`retrieve_index` runs the identical traversal and withholds the bodies.
+`fetch_nodes` returns the ones you ask for; ids that are pending,
+rejected or another team's come back in `missing` rather than as an
+error, because that is the approval gate working.
+
+**When it is worth it:** a wide neighborhood, or a session that needs
+one specific thing out of many. **When it is not:** a small
+neighborhood, or a session that will read most of what comes back. Two
+round trips to save a few hundred tokens is a worse deal than one, and
+an agent that fetches every id it indexed has saved nothing and spent an
+extra call. `retrieve_context` is still the default for exactly that
+reason.
+
+The index is a projection of the full result rather than a cheaper
+second query, so one cache entry serves both modes - including
+cross-user cache hits, which are the evidence that this is shared rather
+than per-agent memory. Splitting the cache by mode would have halved
+that figure for no gain.
+
+**The metrics do not flatter this.** `agenthive_tokens_avoided_total` is
+computed against the full neighborhood in both modes. Defining it
+against bytes actually sent would make the headline number jump the
+moment a caller switched mode, and jump again when it fetched the bodies
+back. The index/fetch pair is counted separately so the net can be
+worked out instead of assumed - see `observability/README.md`, which is
+explicit that if the difference trends to zero the layer is costing a
+round trip and buying nothing.
+
+## Reserved tags
+
+Tags are free-form, but four names carry meaning: `decision`, `bugfix`,
+`security_alert`, and `sensitive`. They are returned by `retrieve_index`,
+so a session can filter on them without reading a body, and they are
+filterable at review time.
+
+`security_alert` and `sensitive` can never be auto-approved. The check
+runs at write time rather than inside the rule matcher, so a rule that
+matched on `agent_id` is caught too - a tag-only check in the matcher
+would have waved that through. An admin can still approve such a node by
+hand in a second; nothing approves it by accident.
+
+## Withholding content from a memory node
+
+Anything wrapped in `<private>...</private>` is stripped from a node's
+title and body **before storage**, leaving a visible `[redacted]`
+marker.
+
+This is not a replacement for the approval gate. The gate is a human
+reading the thing, which means it catches a leaked credential only after
+it is already in the database and rendered in an admin's browser. This
+never writes it down. Both controls, not either.
+
+```python
+client.log_session(
+    title="Rotated the signing key",
+    body="Fixed by rotating. Old value was <private>REDACT_ME</private>.",
+)
+# stored as: "Fixed by rotating. Old value was [redacted]."
+```
+
+An unclosed `<private>` strips to the end of the text on purpose.
+Treating a malformed tag as literal text would store exactly the content
+the author was trying to withhold, which is the wrong way round for a
+failure nobody will notice.
 
 ## Reviewing pending memory
 
