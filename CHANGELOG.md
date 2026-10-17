@@ -1,3 +1,24 @@
+# [1.11.0](https://github.com/polarpoint-io/agenthive/compare/v1.10.0...v1.11.0) (2026-10-17)
+
+
+### Bug Fixes
+
+* **aliases:** store keys whole, resolve by id, always clear on rejection ([fd94ade](https://github.com/polarpoint-io/agenthive/commit/fd94adef50ef4b01874307f161a90383ac075665)), closes [#7](https://github.com/polarpoint-io/agenthive/issues/7)
+* **tests:** put the repo root on sys.path in test_insights_unit ([76d4ec2](https://github.com/polarpoint-io/agenthive/commit/76d4ec270fe2a5f355b8c27d7f39a34dfd7c9821))
+
+
+### Features
+
+* make the memory graph improve itself, and automate half the gate ([dd0ed94](https://github.com/polarpoint-io/agenthive/commit/dd0ed944611ca119dbfea43429ed40e84b50a72f))
+* make the memory graph improve itself, and automate half the gate ([3989d48](https://github.com/polarpoint-io/agenthive/commit/3989d48a3640f497c93e4bcf0ce73410a858333f))
+* memory processing ([ce171bd](https://github.com/polarpoint-io/agenthive/commit/ce171bd6763ed3b1550b91806a0c826599e9c8af))
+* **retrieval:** anchor aliases, and fix rejection not clearing the cache ([6d7c2b8](https://github.com/polarpoint-io/agenthive/commit/6d7c2b82d8aac2898609467a48d9c26ed4ccf5f1))
+
+
+### Performance Improvements
+
+* **gate:** narrow the duplicate check in SQL instead of scanning ([5064274](https://github.com/polarpoint-io/agenthive/commit/5064274853bfd5645ec8eff18d9d784d6892a551))
+
 # [1.10.0](https://github.com/polarpoint-io/agenthive/compare/v1.9.0...v1.10.0) (2026-10-17)
 
 
