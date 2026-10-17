@@ -7,18 +7,20 @@ title AgentHive - Container Diagram
 Person(admin, "Team Admin", "Reviews pending memory, manages users and auto-approve rules")
 Person(member, "Team Member", "Runs a coding-agent session against the team's memory")
 
-System_Ext(coding_agent, "Coding Agent Session", "client.py - retrieve_context at session start, log_session at session end")
+System_Ext(coding_agent, "Coding Agent Session", "client.py - retrieval at session start, log_session at session end")
+System_Ext(session_hook, "Session-End Hook", "Spawned by the harness outside the agent's loop, so it runs even when the session crashed or was truncated")
 System_Ext(otel_backend, "OTLP Backend", "Jaeger, Tempo, or any OTLP/HTTP-compatible tracing backend")
 System_Ext(prometheus, "Prometheus", "Scrapes on an interval")
 
 System_Boundary(agenthive, "AgentHive") {
-  Container(api, "AgentHive Service", "Python 3.11, stdlib http.server (ThreadingHTTPServer)", "Auth + rate limiting, the approval gate, bounded retrieval by traversal, the review UI (GET /ui), Prometheus metrics (GET /metrics), and OpenTelemetry spans")
+  Container(api, "AgentHive Service", "Python 3.11, stdlib http.server (ThreadingHTTPServer)", "Auth + rate limiting; the approval gate, which also strips author-marked private blocks before storage and holds reserved-tag writes for human review however broad an auto-approve rule is; bounded retrieval by traversal, served either in full or as an index with bodies withheld for a follow-up fetch; the review UI (GET /ui); Prometheus metrics (GET /metrics); OpenTelemetry spans")
   ContainerDb(db, "Memory Store", "SQLite file or PostgreSQL", "Teams, users, agents, tasks, tiered memory nodes (pending / approved / rejected), and the per-retrieval access log")
-  ContainerDb(cache, "Rate Limiter + Retrieval Cache", "In-memory (single replica) or Redis (shared across replicas)", "Per-token rate-limit counters; cached bounded-traversal results with cross-user reuse tracking")
+  ContainerDb(cache, "Rate Limiter + Retrieval Cache", "In-memory (single replica) or Redis (shared across replicas)", "Per-token rate-limit counters; one cached traversal per anchor, serving both disclosure modes from the same entry, with cross-user reuse tracking")
 }
 
 Rel(member, coding_agent, "Runs")
-Rel(coding_agent, api, "retrieve_context / log_session", "HTTPS/JSON, X-API-Key")
+Rel(coding_agent, api, "retrieve_context, or retrieve_index then fetch_nodes / log_session", "HTTPS/JSON, X-API-Key")
+Rel(session_hook, api, "Records an unsummarised session when the agent logged nothing", "HTTPS/JSON, X-API-Key")
 Rel(admin, api, "Reviews, manages users, configures rules", "HTTPS")
 Rel(api, db, "Reads/writes", "SQL")
 Rel(api, cache, "Rate-limit checks, cache lookups and writes", "in-process, or Redis protocol")
