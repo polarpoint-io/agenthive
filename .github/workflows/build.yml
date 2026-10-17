@@ -186,7 +186,23 @@ jobs:
           for i in $(seq 1 30); do
             curl -fsS "http://localhost:${{ matrix.host_port }}${{ matrix.path }}" && break || sleep 2
           done
-          curl -fsS "http://localhost:${{ matrix.host_port }}${{ matrix.path }}" | grep -qi "${{ matrix.expect }}"
+          # Captured, then matched - deliberately not piped.
+          #
+          # `curl ... | grep -q` is a race: grep -q exits the moment it
+          # matches and closes the pipe, curl can then fail writing the
+          # rest, and `set -o pipefail` promotes that into a step failure
+          # even though the match SUCCEEDED. It bites the larger response
+          # (the UI's index.html) and not the small one (/healthz), which
+          # is the asymmetry seen in practice.
+          #
+          # This is hardening, not a confirmed diagnosis: the UI smoke
+          # test failed once on main with curl's exit 23 (write error) on
+          # a tree that passed twice on the branch, and that failure was
+          # not reproducible. Removing the pipe removes one whole class of
+          # cause for free, and loses nothing if it turns out to have been
+          # something else.
+          body="$(curl -fsS "http://localhost:${{ matrix.host_port }}${{ matrix.path }}")"
+          printf '%s' "$body" | grep -qi "${{ matrix.expect }}"
           docker rm -f smoke
 
   chart:
