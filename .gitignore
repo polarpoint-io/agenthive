@@ -3,3 +3,7 @@ __pycache__/
 *.db
 .env
 .pytest_cache/
+
+
+# Marp build output
+docs/deck/build/

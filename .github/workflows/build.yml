@@ -26,7 +26,27 @@ jobs:
         with:
           python-version: "3.11"
       - run: pip install -r requirements.txt
-      - run: pytest -v
+      - name: Run the SQLite suite
+        run: |
+          set +e
+          pytest -v --tb=short > pytest-sqlite.txt 2>&1
+          code=$?
+          tail -n 120 pytest-sqlite.txt
+          if [ "$code" -ne 0 ]; then
+            python - << 'PY'
+          import pathlib
+          tail = pathlib.Path("pytest-sqlite.txt").read_text(errors="replace")[-3000:]
+          tail = tail.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+          print(f"::error title=SQLite pytest::SQLite pytest failed%0A{tail}")
+          PY
+          fi
+          exit "$code"
+      - name: Upload the SQLite pytest log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pytest-sqlite-log
+          path: pytest-sqlite.txt
 
   test-postgres:
     runs-on: ubuntu-latest

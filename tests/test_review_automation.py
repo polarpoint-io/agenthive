@@ -216,3 +216,52 @@ def test_node_ids_never_become_metric_labels(live_server, client_lib):
 
     with urllib.request.urlopen(live_server + "/metrics", timeout=10) as resp:
         assert node_id not in resp.read().decode()
+
+
+def test_rejecting_an_approved_node_stops_it_being_served_immediately(live_server, client_lib):
+    """Approving invalidated the retrieval cache; rejecting did not. So a
+    node a human had just pulled out of shared memory carried on being
+    served to every agent for up to cache_ttl_seconds - the gate deciding
+    something is wrong and nobody downstream finding out.
+
+    The asymmetry is the bug. A rejection is the more urgent of the two
+    directions, not the less.
+    """
+    c, _, _ = _team(client_lib, live_server)
+    c.log_session(title="Wrong answer", body="this turns out to be wrong")
+    node = c.list_pending()["pending"][0]
+    c.approve(node["id"])
+
+    # Populate the cache for this anchor.
+    assert c.retrieve_context("Wrong answer")["neighborhood_count"] == 1
+
+    c.reject(node["id"], reason="turned out to be wrong")
+
+    assert c.retrieve_context("Wrong answer")["neighborhood_count"] == 0
+
+
+def test_rejection_invalidates_the_cache_even_when_it_looked_pending(live_server, client_lib):
+    """Invalidation used to be gated on the status READ BEFORE the
+    update. A node seen as pending here, approved and cached by a
+    concurrent request, then rejected by this one, skipped invalidation
+    and stayed served until the entry expired.
+
+    Hard to drive through the HTTP API as a true race, so this pins the
+    weaker but sufficient property: a rejection always clears the team's
+    cache, whatever the node looked like on the way in.
+    """
+    c, _, _ = _team(client_lib, live_server)
+    c.log_session(title="Cached neighbour", body="this is cached")
+    neighbour = c.list_pending()["pending"][0]
+    c.approve(neighbour["id"])
+    assert c.retrieve_context("Cached neighbour")["neighborhood_count"] == 1
+
+    # Reject something that was never approved - under the old condition
+    # this returned without touching the cache at all.
+    c.log_session(title="Never approved", body="junk")
+    junk = next(n for n in c.list_pending()["pending"] if n["title"] == "Never approved")
+    c.reject(junk["id"], reason="no")
+
+    # The cache was cleared, so this is served fresh rather than from a
+    # pre-rejection entry.
+    assert c.retrieve_context("Cached neighbour")["neighborhood_count"] == 1

@@ -65,22 +65,74 @@ def build_graph(nodes: list) -> dict:
                 adj[s].add(t)
                 adj[t].add(s)
 
-    return {"by_slug": by_slug, "adj": adj}
+    # `nodes` keeps every node, including ones that lost a title
+    # collision and are therefore missing from by_slug. Alias resolution
+    # needs to find those by id; traversal still uses by_slug.
+    return {"by_slug": by_slug, "adj": adj, "nodes": nodes}
 
 
-def resolve_start_slugs(graph: dict, anchor_title: str) -> tuple:
-    """Return (start_slugs, exact).
+def resolve_start_slugs(graph: dict, anchor_title: str, aliases=None) -> tuple:
+    """Return (start_slugs, exact) - the original two-value contract.
 
-    exact is True when anchor_title's slug is an approved note. Otherwise
-    start_slugs is a short, ranked fallback (possibly empty)."""
+    exact is True when anchor_title's slug is an approved note. Callers
+    needing to tell an alias hit from a token fallback want
+    resolve_with_kind below; this stays a thin wrapper so every existing
+    caller and test keeps the boolean it was written against."""
+    starts, kind = resolve_with_kind(graph, anchor_title, aliases)
+    return starts, kind == "exact"
+
+
+def resolve_with_kind(graph: dict, anchor_title: str, aliases=None) -> tuple:
+    """Return (start_slugs, kind) where kind is exact | alias | fallback | none.
+
+    Three ways an anchor can land, tried in order of confidence:
+
+    1. An exact title. Unambiguous, and the fast path.
+    2. An ALIAS - a phrasing a human has explicitly mapped to a node,
+       usually while clearing it off the gap list. This is the cheap
+       approximation of semantic search: it needs no embeddings and no
+       model, because a person already did the matching, once, and the
+       answer is reusable by everybody afterwards.
+    3. Token overlap, capped so a broad phrase cannot return the graph.
+
+    Aliases sit ABOVE the fallback deliberately. The fallback is a guess
+    that happens to be right often enough to keep; an alias is somebody
+    saying "this phrasing means this note". Letting a guess outrank a
+    recorded answer would make resolution worse the more it learned."""
     by_slug = graph["by_slug"]
     exact = slug(anchor_title)
     if exact in by_slug:
-        return [exact], True
+        return [exact], "exact"
+
+    if aliases:
+        target_id = aliases.get(exact)
+        if target_id:
+            # Resolved against every node, not against by_slug.
+            #
+            # build_graph keeps ONE node per normalised title, so when two
+            # approved notes share a title the loser is absent from
+            # by_slug entirely - and the store does permit that (same
+            # title, different body, is an improvement rather than a
+            # duplicate). Searching by_slug meant an alias to the losing
+            # node silently fell through to the token fallback, and
+            # adding a same-titled note could break an alias that had
+            # been working.
+            #
+            # Looking the id up in the full set and then starting from
+            # its title's slug fixes the resolution. The graph still
+            # conflates same-titled notes - that is a property of keying
+            # by title and predates aliases - but the alias now lands on
+            # the right title instead of nothing.
+            for node in graph.get("nodes") or by_slug.values():
+                if node["id"] == target_id:
+                    target_slug = slug(node["title"])
+                    if target_slug in by_slug:
+                        return [target_slug], "alias"
+                    break
 
     wanted = significant_tokens(anchor_title)
     if not wanted:
-        return [], False
+        return [], "none"
     wanted_set = set(wanted)
 
     covering = []
@@ -98,17 +150,17 @@ def resolve_start_slugs(graph: dict, anchor_title: str) -> tuple:
 
     if covering:
         covering.sort()
-        return [covering[0][3]], False
+        return [covering[0][3]], "fallback"
 
     if not covered_by_query:
-        return [], False
+        return [], "none"
     covered_by_query.sort()
     best_token_count = -covered_by_query[0][0]
     starts = [
         row[2] for row in covered_by_query
         if -row[0] == best_token_count
     ][:_FALLBACK_MAX_STARTS]
-    return starts, False
+    return starts, "fallback"
 
 
 def traverse(graph: dict, anchor_title: str, hops: int = 2, hub_cutoff: int = 15) -> list:
@@ -143,11 +195,15 @@ def traverse(graph: dict, anchor_title: str, hops: int = 2, hub_cutoff: int = 15
 
 
 def retrieve(approved_nodes: list, anchor_title: str, hops: int = 2,
-             hub_cutoff: int = 15) -> dict:
+             hub_cutoff: int = 15, aliases=None) -> dict:
     """High-level entry point used by the server. Returns the neighborhood
     plus an approximate token count, same shape as retrieve.py --show-tokens."""
     graph = build_graph(approved_nodes)
-    starts, exact = resolve_start_slugs(graph, anchor_title)
+    starts, kind = resolve_with_kind(graph, anchor_title, aliases)
+    # An alias is as definite as an exact title, so it gets the same
+    # unbounded treatment - the fallback cap exists to stop a vague guess
+    # dragging in the graph, and an alias is not a guess.
+    exact = kind in ("exact", "alias")
     neighborhood = []
     seen = set()
     for start in starts:
@@ -178,7 +234,7 @@ def retrieve(approved_nodes: list, anchor_title: str, hops: int = 2,
         # most retrievals fall back is one whose titles don't match how
         # people actually phrase things, which is a naming problem no
         # amount of traversal tuning will fix.
-        "resolution": "exact" if exact else ("fallback" if starts else "none"),
+        "resolution": kind,
         "team_node_count": len(approved_nodes),
         "neighborhood_count": len(neighborhood),
         "neighborhood": [

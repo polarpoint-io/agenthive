@@ -127,6 +127,23 @@ CREATE TABLE IF NOT EXISTS auto_reject_rules (
     active INTEGER NOT NULL DEFAULT 1
 );
 
+-- A phrasing a human has mapped to a node, almost always while clearing
+-- it off the gap list. This is the cheap approximation of semantic
+-- search: no embeddings, no model, because a person did the matching
+-- once and everybody gets the answer afterwards.
+--
+-- PK on (team_id, anchor_key) so one phrasing resolves to one node and
+-- re-aliasing replaces rather than accumulating ambiguity.
+CREATE TABLE IF NOT EXISTS anchor_aliases (
+    team_id TEXT NOT NULL REFERENCES teams(id),
+    anchor_key TEXT NOT NULL,
+    anchor TEXT NOT NULL,
+    node_id TEXT NOT NULL REFERENCES memory_nodes(id),
+    created_by TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (team_id, anchor_key)
+);
+
 CREATE TABLE IF NOT EXISTS memory_access_log (
     id TEXT PRIMARY KEY,
     team_id TEXT NOT NULL REFERENCES teams(id),
@@ -189,6 +206,11 @@ def new_id() -> str:
 
 def now() -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+
+# An alias key is stored and looked up verbatim, so it cannot be
+# truncated. Bounded instead, with a refusal rather than a silent cut.
+MAX_ANCHOR_KEY = 500
 
 
 def _age_seconds(stamp: str) -> float:
@@ -709,12 +731,34 @@ class Store:
     def find_approved_duplicate(self, team_id: str, title: str, body: str):
         """An approved node with identical title AND body.
 
-        Compared in Python rather than SQL so normalisation matches
-        governance.normalise_for_duplicate exactly - a LOWER()/TRIM()
-        pair would drift from it the first time either changes, and the
-        two disagreeing is how a duplicate check silently stops working."""
+        Narrowed in SQL, decided in Python. The first version loaded and
+        normalised EVERY approved node on EVERY write, which is an O(n)
+        scan with full body hydration on the hot write path - it roughly
+        doubled the test suite's runtime before anybody noticed, and on a
+        real graph it would have been far worse.
+
+        SQL only filters by normalised title, which it can do exactly:
+        governance normalises a title with .strip().lower(), and
+        LOWER(TRIM(title)) is the same operation on both backends. The
+        authoritative comparison, including the body's whitespace
+        collapsing, still happens in Python against the handful of rows
+        that survive - so the two cannot drift apart on the part that is
+        actually subtle.
+
+        idx_memory_team_title already covers (team_id, title), so this is
+        an index lookup rather than the scan it replaced."""
+        title_key = (title or "").strip().lower()
+        if not title_key:
+            return None
+
+        rows = self.backend.query_all(
+            "SELECT * FROM memory_nodes "
+            "WHERE team_id = ? AND status = 'approved' AND LOWER(TRIM(title)) = ?",
+            (team_id, title_key),
+        )
         key = governance.normalise_for_duplicate(title, body)
-        for node in self.approved_nodes(team_id):
+        for row in rows:
+            node = _row_to_node(row)
             if governance.normalise_for_duplicate(node["title"], node["body"]) == key:
                 return node
         return None
@@ -890,6 +934,94 @@ class Store:
             "last_missed_at = excluded.last_missed_at",
             (team_id, key, display, user_id, now()),
         )
+
+    # ---- anchor aliases ----
+
+    def create_alias(self, team_id: str, anchor: str, node_id: str,
+                      created_by: str) -> dict:
+        """Map a phrasing to a node. Upsert, because re-aliasing is a
+        correction rather than a second opinion.
+
+        The key is stored WHOLE. It used to be truncated to 200
+        characters while retrieval looked up the full slug, so any longer
+        phrase was accepted and then never resolved - and two different
+        phrases sharing a 200-character prefix silently overwrote each
+        other. Storage and lookup have to agree exactly or the feature
+        fails in the one case nobody tests by hand.
+
+        Over-long anchors are now refused rather than quietly cut down:
+        an explicit error is better than an alias that looks saved and
+        never fires."""
+        from retrieval import slug
+
+        key = slug(anchor)
+        if not key:
+            raise ValueError("anchor must contain something to match on")
+        if len(key) > MAX_ANCHOR_KEY:
+            raise ValueError(
+                f"anchor is {len(key)} characters; the limit is {MAX_ANCHOR_KEY}. "
+                "An anchor this long is a paragraph, not a phrasing - alias the "
+                "phrase people actually search for.")
+
+        node = self.get_memory(node_id)
+        if not node or node["team_id"] != team_id:
+            # Same shape as every other cross-team read here: an id from
+            # elsewhere is simply not found, with no way to tell that
+            # apart from a typo.
+            raise ValueError("node not found in this team")
+        if node["status"] != "approved":
+            raise ValueError(
+                "can only alias to an approved node - a pending one is "
+                "invisible to retrieval, so the alias would resolve to nothing")
+
+        self.backend.execute(
+            "INSERT INTO anchor_aliases "
+            "(team_id, anchor_key, anchor, node_id, created_by, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT (team_id, anchor_key) DO UPDATE SET "
+            "node_id = excluded.node_id, anchor = excluded.anchor, "
+            "created_by = excluded.created_by, created_at = excluded.created_at",
+            (team_id, key, anchor.strip()[:200], node_id, created_by, now()),
+        )
+        return self.get_alias(team_id, key)
+
+    def get_alias(self, team_id: str, anchor_key: str):
+        row = self.backend.query_one(
+            "SELECT * FROM anchor_aliases WHERE team_id = ? AND anchor_key = ?",
+            (team_id, anchor_key),
+        )
+        return dict(row) if row else None
+
+    def list_aliases(self, team_id: str):
+        """Aliases with the title each one points at, so the review UI can
+        show what it means rather than an opaque id."""
+        rows = self.backend.query_all(
+            "SELECT a.*, n.title as node_title, n.status as node_status "
+            "FROM anchor_aliases a JOIN memory_nodes n ON n.id = a.node_id "
+            "WHERE a.team_id = ? ORDER BY a.created_at DESC",
+            (team_id,),
+        )
+        return [dict(r) for r in rows]
+
+    def alias_map(self, team_id: str) -> dict:
+        """{anchor_key: node_id} for the retrieval path. One small query
+        per uncached retrieval; the table has one row per phrasing a human
+        has bothered to record, so it stays small by construction."""
+        rows = self.backend.query_all(
+            "SELECT anchor_key, node_id FROM anchor_aliases WHERE team_id = ?",
+            (team_id,),
+        )
+        return {r["anchor_key"]: r["node_id"] for r in rows}
+
+    def delete_alias(self, team_id: str, anchor_key: str) -> None:
+        self.backend.execute(
+            "DELETE FROM anchor_aliases WHERE team_id = ? AND anchor_key = ?",
+            (team_id, anchor_key),
+        )
+
+    def global_alias_count(self) -> int:
+        row = self.backend.query_one("SELECT COUNT(*) as n FROM anchor_aliases")
+        return row["n"] if row else 0
 
     def close_retrieval_miss(self, team_id: str, anchor: str) -> int:
         """A previously-missing anchor just returned something. Clear the

@@ -87,9 +87,10 @@ REVIEW_LATENCY = Histogram(
 ANCHOR_RESOLUTION = Counter(
     "agenthive_anchor_resolution_total",
     "How each retrieval's anchor matched: exact title, token fallback, or "
-    "nothing. A high fallback share means titles don't match how people "
-    "phrase things - a naming problem no traversal tuning will fix.",
-    ["resolution"], registry=REGISTRY,  # exact | fallback | none
+    "nothing, or an alias a human recorded. A high fallback share means "
+    "titles don't match how people phrase things - a naming problem no "
+    "traversal tuning will fix, but one an alias fixes permanently.",
+    ["resolution"], registry=REGISTRY,  # exact | alias | fallback | none
 )
 NEIGHBORHOOD_SIZE = Histogram(
     "agenthive_retrieval_neighborhood_size",
@@ -284,6 +285,11 @@ class DbStatsCollector:
             "invisible to retrieval, so this climbing is context quietly "
             "degrading for every agent on the team.",
         )
+        aliases = GaugeMetricFamily(
+            "agenthive_anchor_aliases",
+            "Phrasings a human has mapped to a node, across all teams. Each "
+            "one converts a repeat miss into a permanent exact hit.",
+        )
         db_up = GaugeMetricFamily(
             "agenthive_db_up", "1 when the storage backend answers, 0 when it does not"
         )
@@ -299,6 +305,7 @@ class DbStatsCollector:
                     by_tier.add_metric([tier], count)
                 open_gaps.add_metric([], _STORE.global_open_gap_count())
                 oldest_pending.add_metric([], _STORE.global_oldest_pending_age_seconds())
+                aliases.add_metric([], _STORE.global_alias_count())
                 db_up.add_metric([], 1 if _STORE.healthcheck() else 0)
             except Exception:
                 # A metrics scrape must never 500 the process. db_up is
@@ -313,6 +320,7 @@ class DbStatsCollector:
         yield by_tier
         yield open_gaps
         yield oldest_pending
+        yield aliases
         yield db_up
 
 
@@ -359,7 +367,7 @@ def record_retrieval(result: dict, cache_status: str, cross_user: bool, mode: st
     RETRIEVALS.inc()
     RETRIEVAL_MODE.labels(mode=mode).inc()
     resolution = result.get("resolution")
-    if resolution in ("exact", "fallback", "none"):
+    if resolution in ("exact", "alias", "fallback", "none"):
         ANCHOR_RESOLUTION.labels(resolution=resolution).inc()
     NEIGHBORHOOD_SIZE.observe(result.get("neighborhood_count") or 0)
     served = result.get("approx_tokens", 0) or 0

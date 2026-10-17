@@ -1,0 +1,56 @@
+@startuml
+' Where the tokens actually go on a retrieval, and what each layer costs.
+' Plain sequence rather than C4: this is about ORDER and COST, not structure.
+skinparam backgroundColor transparent
+skinparam shadowing false
+skinparam defaultFontName Helvetica
+skinparam sequenceMessageAlign left
+skinparam ParticipantPadding 12
+skinparam BoxPadding 8
+
+title Progressive disclosure - one traversal, two ways to pay for it
+
+participant "Agent session" as agent
+participant "AgentHive" as api
+database "Approved graph" as db
+
+== The default: one call, every body ==
+
+agent -> api : retrieve_context(anchor)
+api -> db : approved nodes for this team
+db --> api : nodes
+api -> api : bounded traversal\n(hops, hub cutoff)
+api --> agent : neighbourhood + every body\n**~2,300 tokens for 5 nodes**
+
+note right of agent
+  One round trip, nothing wasted on
+  a second call. The right default -
+  and it bills for bodies the agent
+  would have skipped given titles.
+end note
+
+== The alternative: see the price before paying it ==
+
+agent -> api : retrieve_context(anchor, mode=index)
+api -> api : the SAME traversal,\nserved from the SAME cache entry
+api --> agent : ids, titles, tiers, tags,\nper-node token cost\n**~40 tokens**
+
+note right of agent
+  Now the agent can choose. Tags
+  narrow it further without reading
+  a single body.
+end note
+
+agent -> api : fetch_nodes([one id])
+api -> db : approved nodes for this team
+db --> api : nodes
+api --> agent : just that body\n**~460 tokens**
+
+note over agent, api
+  **500 against 2,300.** The saving is the four bodies never sent.
+  An agent that fetches all five has saved nothing and spent an
+  extra round trip - which is why retrieve_context stays the
+  default, and why the metrics report both halves separately.
+end note
+
+@enduml
