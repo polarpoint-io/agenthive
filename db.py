@@ -16,6 +16,7 @@ per-backend DDL branching is needed - this is the "the schema translates
 directly" migration path the original ADR called out.
 """
 import json
+import governance
 import sqlite3
 import time
 import uuid
@@ -651,7 +652,15 @@ class Store:
         tags = tags or []
         links_list = links or []
 
+        # A reserved tag outranks any rule that would have matched - checked
+        # here rather than inside find_matching_rule so a rule that matched on
+        # agent_id is caught too, which a tag-only check inside the matcher
+        # would have waved through. See governance.NEVER_AUTO_APPROVE.
         rule = self.find_matching_rule(team_id, tags, agent_id)
+        self.last_auto_approve_blocked = False
+        if rule is not None and governance.blocks_auto_approve(tags):
+            rule = None
+            self.last_auto_approve_blocked = True
         status = "approved" if rule else "pending"
         reviewed_at = now() if rule else None
         reviewed_by = f"auto-approve:{rule['id']}" if rule else None

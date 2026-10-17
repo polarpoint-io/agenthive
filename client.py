@@ -97,6 +97,34 @@ class TeamMemoryClient:
             span_name="retrieve_context",
         )
 
+    def retrieve_index(self, anchor: str, hops: int = 2, hub_cutoff: int = 15,
+                        tags=None) -> dict:
+        """Same traversal as retrieve_context, bodies withheld. Returns
+        ids/titles/tiers/tags plus a per-node token cost, so a session can
+        decide what is worth reading before paying for any of it. Follow
+        with fetch_nodes(ids) for the ones that are.
+
+        Worth it when the neighborhood is wide or the session only needs
+        one thing from it. Not worth it when the neighborhood is small -
+        two round trips to save a few hundred tokens is a bad trade, and
+        retrieve_context is still the default for that reason."""
+        query = {"anchor": anchor, "hops": hops, "hub_cutoff": hub_cutoff, "mode": "index"}
+        if tags:
+            query["tags"] = ",".join(tags)
+        return self._request(
+            "GET", "/teams/" + self._team_id() + "/memory/retrieve",
+            query=query, span_name="retrieve_index",
+        )
+
+    def fetch_nodes(self, ids) -> dict:
+        """Bodies for specific node ids from retrieve_index. Ids that are
+        rejected, un-approved, or another team's come back in `missing`
+        rather than as an error - that is the gate working."""
+        return self._request(
+            "POST", "/teams/" + self._team_id() + "/memory/fetch",
+            body={"ids": list(ids)}, span_name="fetch_nodes",
+        )
+
     def log_session(self, title: str, body: str, agent_id: str = None,
                      task_id: str = None, tags=None, links=None, tier: str = "L1") -> dict:
         """Call at the end of a session. Writes a memory node - PENDING

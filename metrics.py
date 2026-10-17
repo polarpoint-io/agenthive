@@ -87,6 +87,48 @@ RETRIEVAL_EMPTY = Counter(
     registry=REGISTRY,
 )
 
+RETRIEVAL_MODE = Counter(
+    "agenthive_retrievals_by_mode_total",
+    "retrieve_context calls by disclosure mode: full returns bodies, index "
+    "withholds them for a follow-up fetch",
+    ["mode"], registry=REGISTRY,  # mode: full | index
+)
+INDEX_TOKENS_WITHHELD = Counter(
+    "agenthive_index_tokens_withheld_total",
+    "Approx body tokens NOT sent because the caller asked for the index "
+    "instead of the full neighborhood. Gross, not net - subtract "
+    "agenthive_fetch_tokens_served_total to get the real saving, because a "
+    "caller that fetches every id back has saved nothing.",
+    registry=REGISTRY,
+)
+FETCHES = Counter(
+    "agenthive_fetches_total", "memory/fetch calls served", registry=REGISTRY,
+)
+FETCH_TOKENS_SERVED = Counter(
+    "agenthive_fetch_tokens_served_total",
+    "Approx tokens returned by memory/fetch - the half of the progressive-"
+    "disclosure round trip that costs rather than saves",
+    registry=REGISTRY,
+)
+FETCH_NODES = Counter(
+    "agenthive_fetch_nodes_total",
+    "Nodes returned by memory/fetch, by outcome. missing covers rejected, "
+    "un-approved and other-team ids alike - the gate working, not an error.",
+    ["outcome"], registry=REGISTRY,  # outcome: served | missing
+)
+
+PRIVATE_BLOCKS_STRIPPED = Counter(
+    "agenthive_private_blocks_stripped_total",
+    "<private> blocks removed from a memory node before it was stored",
+    registry=REGISTRY,
+)
+AUTO_APPROVE_BLOCKED = Counter(
+    "agenthive_auto_approve_blocked_total",
+    "Writes that matched an auto-approve rule but were held for human "
+    "review anyway because of a reserved tag (security_alert/sensitive)",
+    registry=REGISTRY,
+)
+
 CACHE_HITS = Counter("agenthive_cache_hits_total", "Retrieval cache hits", registry=REGISTRY)
 CACHE_MISSES = Counter("agenthive_cache_misses_total", "Retrieval cache misses", registry=REGISTRY)
 CROSS_USER_CACHE_HITS = Counter(
@@ -150,20 +192,38 @@ def record_review(approved: bool):
     MEMORY_REVIEWS.labels(decision="approved" if approved else "rejected").inc()
 
 
-def record_retrieval(result: dict, cache_status: str, cross_user: bool):
-    """cache_status: 'hit' | 'miss' | 'disabled'.
+def record_retrieval(result: dict, cache_status: str, cross_user: bool, mode: str = "full"):
+    """cache_status: 'hit' | 'miss' | 'disabled'. mode: 'full' | 'index'.
 
     Token avoidance is counted only when a note was returned. An empty
     neighborhood did not spare the caller a full-graph dump; it spared
-    them nothing, because there was nothing to fold into context."""
+    them nothing, because there was nothing to fold into context.
+
+    `mode` deliberately does NOT change tokens_avoided. In index mode the
+    response really is tiny, so computing avoided from what was sent would
+    make the headline number jump the moment a caller switches mode - and
+    then jump again, in the same direction, when it fetches the bodies
+    back. Avoidance stays defined against the full neighborhood either
+    way, and the index/fetch pair is tracked on its own counters so the
+    net can be worked out rather than assumed."""
     RETRIEVALS.inc()
+    RETRIEVAL_MODE.labels(mode=mode).inc()
     served = result.get("approx_tokens", 0) or 0
     TOKENS_SERVED.inc(served)
+
+    # In index mode `served` is titles only, so the full-neighborhood cost
+    # has to come from the field project_index() preserved for exactly this.
+    full_neighborhood = (
+        result.get("approx_tokens_full_neighborhood") if mode == "index" else served
+    ) or 0
+
     if (result.get("neighborhood_count") or 0) > 0:
         RETRIEVAL_HITS.inc()
-        avoided = max((result.get("approx_tokens_full_team", 0) or 0) - served, 0)
+        avoided = max((result.get("approx_tokens_full_team", 0) or 0) - full_neighborhood, 0)
         TOKENS_AVOIDED.inc(avoided)
         REDUCTION_PCT.observe(result.get("reduction_pct", 0) or 0)
+        if mode == "index":
+            INDEX_TOKENS_WITHHELD.inc(max(full_neighborhood - served, 0))
     else:
         RETRIEVAL_EMPTY.inc()
     if cache_status == "hit":
@@ -179,3 +239,23 @@ def render() -> bytes:
 
 
 CONTENT_TYPE = CONTENT_TYPE_LATEST
+
+
+def record_fetch(result: dict):
+    """The paying half of progressive disclosure. Counted separately from
+    retrievals so the two are never conflated in a dashboard."""
+    FETCHES.inc()
+    served = result.get("approx_tokens", 0) or 0
+    FETCH_TOKENS_SERVED.inc(served)
+    TOKENS_SERVED.inc(served)
+    FETCH_NODES.labels(outcome="served").inc(result.get("node_count", 0) or 0)
+    FETCH_NODES.labels(outcome="missing").inc(len(result.get("missing") or []))
+
+
+def record_private_stripped(blocks: int):
+    if blocks > 0:
+        PRIVATE_BLOCKS_STRIPPED.inc(blocks)
+
+
+def record_auto_approve_blocked():
+    AUTO_APPROVE_BLOCKED.inc()

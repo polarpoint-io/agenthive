@@ -176,7 +176,14 @@ def retrieve(approved_nodes: list, anchor_title: str, hops: int = 2,
         "team_node_count": len(approved_nodes),
         "neighborhood_count": len(neighborhood),
         "neighborhood": [
-            {"id": n["id"], "title": n["title"], "tier": n["tier"], "body": n["body"]}
+            {
+                "id": n["id"], "title": n["title"], "tier": n["tier"],
+                "body": n["body"],
+                # Carried so project_index() can hand an agent something to
+                # filter on without reading a single body. Costs a few bytes
+                # on the full response; makes the index layer worth having.
+                "tags": n.get("tags") or [],
+            }
             for n in neighborhood
         ],
         "approx_tokens": total_chars // 4,
@@ -197,3 +204,126 @@ def pending_title_match(pending_nodes: list, anchor_title: str):
         return None
     node = graph["by_slug"][starts[0]]
     return {"id": node["id"], "title": node["title"], "exact": exact}
+
+
+# ---------------------------------------------------------------------------
+# Progressive disclosure
+# ---------------------------------------------------------------------------
+# retrieve() answers "what is near this anchor, and here is all of it".
+# That is one round trip and no wasted calls, which is why it stays the
+# default - but it bills the caller for every body in the neighborhood,
+# including the ones they would have skipped had they been able to see the
+# titles first.
+#
+# project_index() is the same traversal with the bodies withheld: ids,
+# titles, tiers, tags, and a per-node token cost. The agent picks the ids
+# worth reading and fetches only those (POST .../memory/fetch).
+#
+# Deliberately a projection of the full result rather than a cheaper
+# second query. The traversal is the same work either way, so computing
+# it once and serving either shape from one cache entry means an index
+# call and a full call share cache hits - including CROSS-USER hits,
+# which is the metric that actually evidences shared memory. A separate
+# query path would have split that in two and halved the apparent reuse.
+#
+# Honesty about the saving: an agent that fetches every id back has saved
+# nothing and spent an extra round trip. So this does NOT touch
+# tokens_avoided (see metrics.py). The withheld-vs-refetched pair is
+# tracked separately and nets out in Grafana - see observability/README.md.
+
+
+def project_index(result: dict) -> dict:
+    """Strip bodies from a retrieve() result, keeping what an agent needs
+    to choose. Shape mirrors retrieve() so a caller can switch modes
+    without re-learning the response."""
+    index = []
+    for node in result.get("neighborhood", []):
+        body = node.get("body") or ""
+        index.append({
+            "id": node["id"],
+            "title": node["title"],
+            "tier": node["tier"],
+            "tags": node.get("tags") or [],
+            # What fetching THIS body would cost, so the choice is priced
+            # per node rather than as one opaque total.
+            "approx_tokens": len(body) // 4,
+        })
+
+    index_chars = sum(len(n["title"]) for n in index)
+    return {
+        "anchor": result.get("anchor"),
+        "mode": "index",
+        "team_node_count": result.get("team_node_count", 0),
+        "neighborhood_count": result.get("neighborhood_count", 0),
+        "neighborhood": index,
+        "approx_tokens": index_chars // 4,
+        "approx_tokens_full_neighborhood": result.get("approx_tokens", 0),
+        "approx_tokens_full_team": result.get("approx_tokens_full_team", 0),
+        "reduction_pct": result.get("reduction_pct", 0),
+    }
+
+
+def filter_by_tags(result: dict, tags) -> dict:
+    """Narrow a result's neighborhood to nodes carrying any of `tags`.
+
+    Applied AFTER traversal on purpose: filtering before it would change
+    which nodes are reachable and silently shrink the graph, so a tag
+    filter would quietly become a traversal boundary. This way the walk
+    is identical and the filter only decides what gets shown."""
+    wanted = {str(t).strip().lower() for t in (tags or []) if str(t).strip()}
+    if not wanted:
+        return result
+
+    kept = [
+        n for n in result.get("neighborhood", [])
+        if wanted & {str(t).strip().lower() for t in (n.get("tags") or [])}
+    ]
+    narrowed = dict(result)
+    narrowed["neighborhood"] = kept
+    narrowed["neighborhood_count"] = len(kept)
+    narrowed["approx_tokens"] = sum(len(n.get("body") or "") for n in kept) // 4
+    narrowed["filtered_by_tags"] = sorted(wanted)
+    return narrowed
+
+
+def select_nodes(approved_nodes: list, node_ids) -> dict:
+    """Layer 3: bodies for specific ids, from this team's APPROVED nodes
+    only.
+
+    Takes the already team-scoped, already approved-only list the caller
+    is entitled to and selects within it, rather than looking ids up
+    directly. An id is an opaque string a caller could have got anywhere,
+    so a direct lookup would be a cross-team read waiting to happen; here
+    an id from another team simply is not in the list and lands in
+    `missing` like any other unknown id, with no way to tell the two
+    apart from outside."""
+    wanted = [str(i) for i in (node_ids or [])]
+    by_id = {n["id"]: n for n in approved_nodes}
+
+    found, missing = [], []
+    seen = set()
+    for node_id in wanted:
+        if node_id in seen:
+            continue
+        seen.add(node_id)
+        node = by_id.get(node_id)
+        if node is None:
+            missing.append(node_id)
+            continue
+        found.append({
+            "id": node["id"], "title": node["title"], "tier": node["tier"],
+            "tags": node.get("tags") or [], "body": node["body"],
+        })
+
+    served_chars = sum(len(n["body"]) for n in found)
+    return {
+        "mode": "fetch",
+        "requested_count": len(seen),
+        "node_count": len(found),
+        "nodes": found,
+        # Not an error. An id can go missing because it was rejected,
+        # un-approved, or belongs to another team - all of which are the
+        # gate working. The caller is told what it did not get.
+        "missing": missing,
+        "approx_tokens": served_chars // 4,
+    }
