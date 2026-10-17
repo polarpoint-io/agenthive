@@ -208,6 +208,11 @@ def now() -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
 
+# An alias key is stored and looked up verbatim, so it cannot be
+# truncated. Bounded instead, with a refusal rather than a silent cut.
+MAX_ANCHOR_KEY = 500
+
+
 def _age_seconds(stamp: str) -> float:
     """Seconds between an ISO stamp written by now() and the present.
 
@@ -935,12 +940,28 @@ class Store:
     def create_alias(self, team_id: str, anchor: str, node_id: str,
                       created_by: str) -> dict:
         """Map a phrasing to a node. Upsert, because re-aliasing is a
-        correction rather than a second opinion."""
+        correction rather than a second opinion.
+
+        The key is stored WHOLE. It used to be truncated to 200
+        characters while retrieval looked up the full slug, so any longer
+        phrase was accepted and then never resolved - and two different
+        phrases sharing a 200-character prefix silently overwrote each
+        other. Storage and lookup have to agree exactly or the feature
+        fails in the one case nobody tests by hand.
+
+        Over-long anchors are now refused rather than quietly cut down:
+        an explicit error is better than an alias that looks saved and
+        never fires."""
         from retrieval import slug
 
-        key = slug(anchor)[:200]
+        key = slug(anchor)
         if not key:
             raise ValueError("anchor must contain something to match on")
+        if len(key) > MAX_ANCHOR_KEY:
+            raise ValueError(
+                f"anchor is {len(key)} characters; the limit is {MAX_ANCHOR_KEY}. "
+                "An anchor this long is a paragraph, not a phrasing - alias the "
+                "phrase people actually search for.")
 
         node = self.get_memory(node_id)
         if not node or node["team_id"] != team_id:

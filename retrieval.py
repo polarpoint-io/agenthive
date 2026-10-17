@@ -65,7 +65,10 @@ def build_graph(nodes: list) -> dict:
                 adj[s].add(t)
                 adj[t].add(s)
 
-    return {"by_slug": by_slug, "adj": adj}
+    # `nodes` keeps every node, including ones that lost a title
+    # collision and are therefore missing from by_slug. Alias resolution
+    # needs to find those by id; traversal still uses by_slug.
+    return {"by_slug": by_slug, "adj": adj, "nodes": nodes}
 
 
 def resolve_start_slugs(graph: dict, anchor_title: str, aliases=None) -> tuple:
@@ -104,13 +107,28 @@ def resolve_with_kind(graph: dict, anchor_title: str, aliases=None) -> tuple:
     if aliases:
         target_id = aliases.get(exact)
         if target_id:
-            for node_slug, node in by_slug.items():
-                # The alias is only honoured when it points at a node
-                # that is in THIS graph - i.e. still approved, still this
-                # team's. A stale alias to something since rejected falls
-                # through to the fallback rather than returning nothing.
+            # Resolved against every node, not against by_slug.
+            #
+            # build_graph keeps ONE node per normalised title, so when two
+            # approved notes share a title the loser is absent from
+            # by_slug entirely - and the store does permit that (same
+            # title, different body, is an improvement rather than a
+            # duplicate). Searching by_slug meant an alias to the losing
+            # node silently fell through to the token fallback, and
+            # adding a same-titled note could break an alias that had
+            # been working.
+            #
+            # Looking the id up in the full set and then starting from
+            # its title's slug fixes the resolution. The graph still
+            # conflates same-titled notes - that is a property of keying
+            # by title and predates aliases - but the alias now lands on
+            # the right title instead of nothing.
+            for node in graph.get("nodes") or by_slug.values():
                 if node["id"] == target_id:
-                    return [node_slug], "alias"
+                    target_slug = slug(node["title"])
+                    if target_slug in by_slug:
+                        return [target_slug], "alias"
+                    break
 
     wanted = significant_tokens(anchor_title)
     if not wanted:

@@ -195,3 +195,75 @@ def test_alias_resolutions_are_counted_separately(live_server, client_lib):
     assert _metric(live_server, "agenthive_anchor_resolution_total",
                    '{resolution="alias"}') == before + 1
     assert _metric(live_server, "agenthive_anchor_aliases") >= 1
+
+
+# --- regressions from the PR #7 review --------------------------------
+
+def test_a_long_anchor_resolves_the_phrase_it_was_saved_under(live_server, client_lib):
+    """The key used to be truncated to 200 characters on write while
+    retrieval looked up the full slug, so any longer phrase was accepted
+    and then never resolved - saved, and silently dead."""
+    c, _, _ = _team(client_lib, live_server)
+    node = _approved(c, "Postgres connection pool exhaustion")
+
+    long_anchor = "why does " + ("the connection pool keep dying " * 8) + "in staging"
+    assert len(long_anchor) > 200
+
+    c.create_alias(long_anchor, node["id"])
+    result = c.retrieve_context(long_anchor)
+    assert result["resolution"] == "alias"
+    assert result["neighborhood"][0]["id"] == node["id"]
+
+
+def test_two_long_anchors_sharing_a_prefix_stay_distinct(live_server, client_lib):
+    """Truncation also collapsed different phrases onto one key, so the
+    second alias silently overwrote the first."""
+    c, _, _ = _team(client_lib, live_server)
+    first = _approved(c, "First target")
+    second = _approved(c, "Second target")
+
+    prefix = "the pool keeps dying " * 11          # > 200 chars
+    c.create_alias(prefix + "in staging", first["id"])
+    c.create_alias(prefix + "in production", second["id"])
+
+    assert len(c.list_aliases()["aliases"]) == 2
+    assert c.retrieve_context(prefix + "in staging")["neighborhood"][0]["id"] == first["id"]
+    assert c.retrieve_context(prefix + "in production")["neighborhood"][0]["id"] == second["id"]
+
+
+def test_an_absurd_anchor_is_refused_rather_than_cut_down(live_server, client_lib):
+    """An explicit error beats an alias that looks saved and never
+    fires."""
+    c, _, _ = _team(client_lib, live_server)
+    node = _approved(c, "Some note")
+    with pytest.raises(RuntimeError):
+        c.create_alias("x" * 600, node["id"])
+
+
+def test_an_alias_survives_a_title_collision(live_server, client_lib):
+    """build_graph keeps one node per normalised title, and the store
+    permits two approved notes sharing a title with different bodies (an
+    improvement, not a duplicate). An alias to whichever node lost that
+    collision used to fall through silently."""
+    c, _, _ = _team(client_lib, live_server)
+    first = _approved(c, "Pool exhaustion", body="first body, raise max_client_conn")
+    second = _approved(c, "Pool exhaustion", body="second body, also bump pool_mode")
+    assert first["id"] != second["id"]
+
+    # Alias each one in turn; both must resolve, whichever won by_slug.
+    for target in (first, second):
+        c.create_alias("pg pool dying", target["id"])
+        result = c.retrieve_context("pg pool dying")
+        assert result["resolution"] == "alias", (
+            f"alias to {target['id']} fell through to {result['resolution']}")
+        assert result["neighborhood_count"] >= 1
+
+
+def test_adding_a_same_titled_note_does_not_break_an_existing_alias(live_server, client_lib):
+    c, _, _ = _team(client_lib, live_server)
+    original = _approved(c, "Pool exhaustion", body="the original body")
+    c.create_alias("pg pool dying", original["id"])
+    assert c.retrieve_context("pg pool dying")["resolution"] == "alias"
+
+    _approved(c, "Pool exhaustion", body="a later note under the same title")
+    assert c.retrieve_context("pg pool dying")["resolution"] == "alias"

@@ -736,7 +736,15 @@ class Handler(BaseHTTPRequestHandler):
         # every agent on the team carrying on reading it anyway.
         #
         # Approving already invalidated. This is the other half.
-        if node["status"] == "approved" and CACHE is not None:
+        #
+        # Unconditional, deliberately. Gating on the status READ BEFORE
+        # the update was a race: a node seen as pending here, approved
+        # and cached by a concurrent request, then rejected by this one,
+        # would skip invalidation and stay served until the entry
+        # expired. Invalidating after a rejection that changed nothing
+        # costs one cheap cache clear on a rare admin action; getting it
+        # wrong leaves a rejected note in everybody's context.
+        if CACHE is not None:
             with tracing.TRACER.start_as_current_span("cache.invalidate_team"):
                 CACHE.invalidate_team(params["team_id"])
         self._send(200, updated)
