@@ -170,3 +170,152 @@ outcome and the dashboard should be able to say so.
 |---|---|
 | `agenthive_private_blocks_stripped_total` | `<private>` blocks removed before storage. Never zero-by-design: zero means nobody is using the marker, not that nothing was sensitive. |
 | `agenthive_auto_approve_blocked_total` | Writes that matched an auto-approve rule but were held for review anyway because of a reserved tag. A steady rate here means a rule is too broad. |
+
+
+## Is the learning loop working?
+
+The memory-processing layer (`insights.py`) raises proposals from how
+the graph has been used. A self-improvement layer that cannot be shown
+to improve anything is the same mistake as a retrieval layer that
+asserts a token saving without measuring it, so these exist to answer
+the question honestly - including when the answer is no.
+
+| Metric | Meaning |
+|---|---|
+| `agenthive_gaps_closed_total` | **The headline.** An anchor that returned nothing now returns something. The graph learned a thing people kept asking for. |
+| `agenthive_gap_misses_recovered_total` | Accumulated misses at the moment each gap closed. Divided by the above, it is the average number of failed lookups a gap cost before anyone filled it - the loop's latency, measured in wasted retrievals. |
+| `agenthive_open_gaps` | Distinct anchors currently returning nothing (gauge, scrape time). |
+| `agenthive_proposals_raised_total{kind}` | What the layer **found**: `gap`, `link`, `tier`, `stale`, `rule`, `noisy`. |
+| `agenthive_tier_changes_applied_total{direction}` | What an admin **acted on**, `promote` vs `demote`. |
+| `agenthive_memory_nodes_by_tier{tier}` | The graph stratifying by use (gauge, scrape time). |
+
+### The three shapes worth alerting on
+
+**The loop is working.** `gaps_closed_total` rising while `open_gaps`
+stays flat or falls. Gaps are being found and filled at roughly the rate
+they appear.
+
+```promql
+increase(agenthive_gaps_closed_total[7d])
+```
+
+**The loop is being ignored.** `proposals_raised_total` climbing while
+`tier_changes_applied_total` stays flat and `open_gaps` grows. The layer
+is doing its job and nobody is reading the output. This is the most
+likely failure and the easiest to miss, because nothing errors.
+
+```promql
+increase(agenthive_open_gaps[30d]) > 0
+  and increase(agenthive_gaps_closed_total[30d]) == 0
+```
+
+**The thresholds are wrong.** Promotions and demotions both high, on a
+small graph - nodes oscillating between tiers rather than settling.
+Raise the counts in `insights.TIER_RULES`.
+
+```promql
+rate(agenthive_tier_changes_applied_total{direction="promote"}[7d])
+  and rate(agenthive_tier_changes_applied_total{direction="demote"}[7d])
+```
+
+A flat `agenthive_memory_nodes_by_tier{tier="L1"}` line holding every
+node in the graph means tier proposals are being generated and never
+applied - the same ignored-loop shape, visible from a different angle.
+
+### What these do not claim
+
+`gaps_closed_total` counts an anchor going from empty to non-empty. It
+does not claim the note that closed it was any *good* - only that
+somebody can now retrieve something for a phrase that used to return
+nothing. Quality is what the approval gate is for, and no counter here
+substitutes for it.
+
+
+## Operational health
+
+These exist because the failures they catch are **silent**. Nothing
+errors, nothing 500s, and the only symptom is answers quietly getting
+worse.
+
+### The review queue
+
+Pending memory is invisible to retrieval. A queue nobody is clearing
+therefore degrades every agent's context with no error anywhere, which
+makes this the thing to page on rather than merely graph.
+
+| Metric | Meaning |
+|---|---|
+| `agenthive_oldest_pending_age_seconds` | Age of the longest-waiting unreviewed node (gauge). |
+| `agenthive_review_latency_seconds` | Write-to-decision time, both approvals and rejections. |
+| `agenthive_writes_by_reserved_tag_total{tag}` | What the queue is made of. A queue that is mostly one tag has one upstream cause. |
+
+```promql
+agenthive_oldest_pending_age_seconds > 3 * 24 * 3600
+```
+
+Reading `review_latency` alongside `memory_writes_total` tells you
+whether the gate is a bottleneck or a formality: a p50 of minutes with
+near-total approval means it is ceremony, and auto-approve rules are
+being under-used.
+
+### Retrieval quality
+
+| Metric | Meaning |
+|---|---|
+| `agenthive_anchor_resolution_total{resolution}` | `exact`, `fallback`, or `none`. |
+| `agenthive_retrieval_neighborhood_size` | Nodes returned per retrieval. |
+
+A rising `fallback` share means titles no longer match how people phrase
+things. That is a **naming** problem, and no amount of `hops` or
+`hub_cutoff` tuning will fix it - the fix is better titles, or the
+embedding-based anchor resolution this does not yet have.
+
+```promql
+sum(rate(agenthive_anchor_resolution_total{resolution="fallback"}[1h]))
+  / sum(rate(agenthive_anchor_resolution_total[1h]))
+```
+
+`neighborhood_size` is the distribution to look at *before* changing
+`hops` or `hub_cutoff`. A long right tail means traversal is pulling in
+more than anyone reads, which is what `mode=index` exists for.
+
+### Auth and storage
+
+| Metric | Meaning |
+|---|---|
+| `agenthive_auth_failures_total{reason}` | `missing_header`, `unknown`, `revoked`, `expired`. |
+| `agenthive_db_up` | 1 when the backend answers, 0 when it does not. |
+
+The HTTP response deliberately refuses to say which case applies, so a
+stolen-token probe learns nothing (see `db.user_by_token`). The metrics
+port is a different audience: a spike in `expired` is a token-TTL
+rollout biting, a spike in `revoked` is someone using a token you
+killed, and the two want different responses.
+
+`db_up` is emitted even when the DB-backed gauges throw, because that is
+precisely when the backend is what is wrong and reporting nothing would
+turn an outage into silence.
+
+
+## Automated rejection
+
+| Metric | Meaning |
+|---|---|
+| `agenthive_auto_rejected_total{cause}` | `duplicate`, `trivial`, or `rule`. |
+
+Auto-rejection is defensible because a lost note can be written again.
+That stops being true if a rule is too broad: it then discards knowledge
+quietly, at volume, and nothing else in the system would say so. Watch
+the rate, and read `GET /teams/{id}/memory/rejected` when it moves.
+
+```promql
+rate(agenthive_auto_rejected_total{cause="rule"}[1h])
+```
+
+A `duplicate` rate that keeps climbing is a different signal: agents are
+relogging content that already exists, which usually means they are not
+calling retrieval at the start of a session.
+
+The reason string carries node and rule ids and is bucketed to three
+label values before it reaches a metric. Ids in a label set is how a
+metrics endpoint becomes a memory leak.

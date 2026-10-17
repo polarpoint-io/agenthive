@@ -173,6 +173,12 @@ def retrieve(approved_nodes: list, anchor_title: str, hops: int = 2,
 
     return {
         "anchor": anchor_title,
+        # How the anchor landed: an exact title, a token fallback, or
+        # nothing. Computed above and previously discarded. A graph where
+        # most retrievals fall back is one whose titles don't match how
+        # people actually phrase things, which is a naming problem no
+        # amount of traversal tuning will fix.
+        "resolution": "exact" if exact else ("fallback" if starts else "none"),
         "team_node_count": len(approved_nodes),
         "neighborhood_count": len(neighborhood),
         "neighborhood": [
@@ -252,6 +258,7 @@ def project_index(result: dict) -> dict:
     index_chars = sum(len(n["title"]) for n in index)
     return {
         "anchor": result.get("anchor"),
+        "resolution": result.get("resolution"),
         "mode": "index",
         "team_node_count": result.get("team_node_count", 0),
         "neighborhood_count": result.get("neighborhood_count", 0),

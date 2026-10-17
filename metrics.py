@@ -55,6 +55,58 @@ MEMORY_REVIEWS = Counter(
     "agenthive_memory_reviews_total", "Manual review decisions",
     ["decision"], registry=REGISTRY,  # decision: approved | rejected
 )
+WRITES_BY_RESERVED_TAG = Counter(
+    "agenthive_writes_by_reserved_tag_total",
+    "Writes carrying each reserved tag, plus 'none'. Shows what the review "
+    "queue is actually made of - a queue that is mostly one tag is a queue "
+    "with one upstream cause.",
+    ["tag"], registry=REGISTRY,
+)
+
+# ---------------------------------------------------------------------------
+# Review queue health
+# ---------------------------------------------------------------------------
+# The approval gate is the mechanism this whole system rests on, and
+# until now nothing measured whether it was keeping up. Pending memory is
+# INVISIBLE to retrieval, so a backed-up queue degrades every agent's
+# context silently: no error, no failed request, no alert, just steadily
+# worse answers. These two are the ones to page on.
+
+REVIEW_LATENCY = Histogram(
+    "agenthive_review_latency_seconds",
+    "Time from a node being written to a human (or a rule) ruling on it",
+    buckets=(60, 300, 900, 3600, 6 * 3600, 24 * 3600, 3 * 24 * 3600,
+             7 * 24 * 3600, 30 * 24 * 3600),
+    registry=REGISTRY,
+)
+
+# ---------------------------------------------------------------------------
+# Retrieval quality
+# ---------------------------------------------------------------------------
+
+ANCHOR_RESOLUTION = Counter(
+    "agenthive_anchor_resolution_total",
+    "How each retrieval's anchor matched: exact title, token fallback, or "
+    "nothing. A high fallback share means titles don't match how people "
+    "phrase things - a naming problem no traversal tuning will fix.",
+    ["resolution"], registry=REGISTRY,  # exact | fallback | none
+)
+NEIGHBORHOOD_SIZE = Histogram(
+    "agenthive_retrieval_neighborhood_size",
+    "Nodes returned per retrieval. The distribution to look at before "
+    "changing hops or hub_cutoff: a long tail means traversal is pulling "
+    "in more than anyone reads.",
+    buckets=(0, 1, 2, 3, 5, 8, 13, 21, 34, 55),
+    registry=REGISTRY,
+)
+
+AUTH_FAILURES = Counter(
+    "agenthive_auth_failures_total",
+    "Rejected requests by reason. The HTTP response stays deliberately "
+    "opaque so a stolen-token probe learns nothing; this is the metrics "
+    "port, where telling a TTL rollout from a revocation actually matters.",
+    ["reason"], registry=REGISTRY,  # missing_header | unknown | revoked | expired
+)
 
 RETRIEVALS = Counter(
     "agenthive_retrievals_total", "retrieve_context calls served", registry=REGISTRY,
@@ -122,11 +174,63 @@ PRIVATE_BLOCKS_STRIPPED = Counter(
     "<private> blocks removed from a memory node before it was stored",
     registry=REGISTRY,
 )
+AUTO_REJECTED = Counter(
+    "agenthive_auto_rejected_total",
+    "Writes rejected without a human, by cause: duplicate, trivial, or a "
+    "rule. A spike is worth reading - auto-rejection is safe because a "
+    "lost note can be rewritten, but a rule that is too broad discards "
+    "knowledge quietly and nothing else would say so.",
+    ["cause"], registry=REGISTRY,  # duplicate | trivial | rule
+)
 AUTO_APPROVE_BLOCKED = Counter(
     "agenthive_auto_approve_blocked_total",
     "Writes that matched an auto-approve rule but were held for human "
     "review anyway because of a reserved tag (security_alert/sensitive)",
     registry=REGISTRY,
+)
+
+# ---------------------------------------------------------------------------
+# The learning loop
+# ---------------------------------------------------------------------------
+# A self-improvement layer that cannot be shown to improve anything is
+# the same mistake as a retrieval layer that asserts a token saving
+# without measuring it. These are the counters that answer "is it
+# working", and they are built so they can also answer "no".
+#
+# agenthive_gaps_closed_total is the headline. A gap closes when an
+# anchor that previously returned nothing returns something - i.e. the
+# graph learned the thing people kept asking for. Rising = the loop
+# works. Flat while agenthive_open_gaps climbs = proposals are being
+# raised and ignored, which is worth knowing and would otherwise be
+# invisible.
+
+GAPS_CLOSED = Counter(
+    "agenthive_gaps_closed_total",
+    "Anchors that previously returned nothing and now return something - "
+    "the memory-processing loop actually closing a known gap",
+    registry=REGISTRY,
+)
+GAP_MISSES_RECOVERED = Counter(
+    "agenthive_gap_misses_recovered_total",
+    "Accumulated miss count of gaps at the moment they closed. Divided by "
+    "gaps_closed_total it gives the average number of failed lookups a gap "
+    "cost before somebody filled it - the latency of the loop, in pain.",
+    registry=REGISTRY,
+)
+TIER_CHANGES = Counter(
+    "agenthive_tier_changes_applied_total",
+    "Tier proposals an admin actually applied, by direction. Promotions "
+    "without demotions means the thresholds only ratchet; a high rate of "
+    "both on the same nodes means they are set too tight and the graph is "
+    "oscillating.",
+    ["direction"], registry=REGISTRY,  # direction: promote | demote
+)
+PROPOSALS = Counter(
+    "agenthive_proposals_raised_total",
+    "Proposals computed by the memory-processing layer, by kind. Counted "
+    "when an endpoint computes them, so this measures what the layer "
+    "FOUND - compare against tier_changes_applied to see what was acted on.",
+    ["kind"], registry=REGISTRY,  # kind: link | tier | rule | noisy | stale | gap
 )
 
 CACHE_HITS = Counter("agenthive_cache_hits_total", "Retrieval cache hits", registry=REGISTRY)
@@ -165,6 +269,24 @@ class DbStatsCollector:
             "Non-revoked users, across all teams",
         )
         teams = GaugeMetricFamily("agenthive_teams", "Total teams")
+        by_tier = GaugeMetricFamily(
+            "agenthive_memory_nodes_by_tier",
+            "Approved memory nodes by tier, across all teams",
+            labels=["tier"],
+        )
+        open_gaps = GaugeMetricFamily(
+            "agenthive_open_gaps",
+            "Distinct anchors currently returning nothing, across all teams",
+        )
+        oldest_pending = GaugeMetricFamily(
+            "agenthive_oldest_pending_age_seconds",
+            "Age of the longest-waiting unreviewed node. Pending memory is "
+            "invisible to retrieval, so this climbing is context quietly "
+            "degrading for every agent on the team.",
+        )
+        db_up = GaugeMetricFamily(
+            "agenthive_db_up", "1 when the storage backend answers, 0 when it does not"
+        )
 
         if _STORE is not None:
             try:
@@ -173,23 +295,51 @@ class DbStatsCollector:
                     nodes_by_status.add_metric([status], count)
                 active_users.add_metric([], _STORE.global_active_user_count())
                 teams.add_metric([], _STORE.global_team_count())
+                for tier, count in _STORE.global_tier_counts().items():
+                    by_tier.add_metric([tier], count)
+                open_gaps.add_metric([], _STORE.global_open_gap_count())
+                oldest_pending.add_metric([], _STORE.global_oldest_pending_age_seconds())
+                db_up.add_metric([], 1 if _STORE.healthcheck() else 0)
             except Exception:
-                pass  # a metrics scrape should never 500 the process
+                # A metrics scrape must never 500 the process. db_up is
+                # emitted here as well: if the queries above threw, the
+                # backend is exactly what is wrong, and reporting nothing
+                # would turn an outage into silence.
+                db_up.add_metric([], 0)
 
         yield nodes_by_status
         yield active_users
         yield teams
+        yield by_tier
+        yield open_gaps
+        yield oldest_pending
+        yield db_up
 
 
 REGISTRY.register(DbStatsCollector())
 
 
-def record_write(auto_approved: bool):
+def record_write(auto_approved: bool, tags=None):
     MEMORY_WRITES.labels(status="auto_approved" if auto_approved else "pending").inc()
+    # Reserved vocabulary only - free-form tags are caller-controlled and
+    # would make this label unbounded, which is how a metrics endpoint
+    # becomes a memory leak.
+    from governance import RESERVED_TAGS
+
+    present = RESERVED_TAGS & {str(t).strip().lower() for t in (tags or [])}
+    for tag in present or {"none"}:
+        WRITES_BY_RESERVED_TAG.labels(tag=tag).inc()
 
 
-def record_review(approved: bool):
+def record_review(approved: bool, latency_seconds: float = None):
     MEMORY_REVIEWS.labels(decision="approved" if approved else "rejected").inc()
+    if latency_seconds is not None and latency_seconds >= 0:
+        REVIEW_LATENCY.observe(latency_seconds)
+
+
+def record_auth_failure(reason: str):
+    if reason in ("missing_header", "unknown", "revoked", "expired"):
+        AUTH_FAILURES.labels(reason=reason).inc()
 
 
 def record_retrieval(result: dict, cache_status: str, cross_user: bool, mode: str = "full"):
@@ -208,6 +358,10 @@ def record_retrieval(result: dict, cache_status: str, cross_user: bool, mode: st
     net can be worked out rather than assumed."""
     RETRIEVALS.inc()
     RETRIEVAL_MODE.labels(mode=mode).inc()
+    resolution = result.get("resolution")
+    if resolution in ("exact", "fallback", "none"):
+        ANCHOR_RESOLUTION.labels(resolution=resolution).inc()
+    NEIGHBORHOOD_SIZE.observe(result.get("neighborhood_count") or 0)
     served = result.get("approx_tokens", 0) or 0
     TOKENS_SERVED.inc(served)
 
@@ -259,3 +413,35 @@ def record_private_stripped(blocks: int):
 
 def record_auto_approve_blocked():
     AUTO_APPROVE_BLOCKED.inc()
+
+
+def record_gap_closed(misses_recovered: int):
+    """One anchor that used to return nothing now returns something."""
+    GAPS_CLOSED.inc()
+    GAP_MISSES_RECOVERED.inc(max(misses_recovered, 0))
+
+
+def record_tier_changes(applied):
+    """applied: an iterable of {"direction": "promote"|"demote"}."""
+    for change in applied:
+        direction = change.get("direction")
+        if direction in ("promote", "demote"):
+            TIER_CHANGES.labels(direction=direction).inc()
+
+
+def record_proposals(kind: str, count: int):
+    if count > 0:
+        PROPOSALS.labels(kind=kind).inc(count)
+
+
+def record_auto_reject(reason: str):
+    """Bucket the free-text reason into a bounded label. The reason
+    string contains node and rule ids, which must never become one."""
+    text = (reason or "").lower()
+    if "identical to approved" in text:
+        cause = "duplicate"
+    elif "characters" in text:
+        cause = "trivial"
+    else:
+        cause = "rule"
+    AUTO_REJECTED.labels(cause=cause).inc()

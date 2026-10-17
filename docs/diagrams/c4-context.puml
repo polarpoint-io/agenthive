@@ -7,7 +7,7 @@ title AgentHive - System Context
 Person(admin, "Team Admin", "Reviews pending memory, manages users and auto-approve rules")
 Person(member, "Team Member", "Runs a coding-agent session against the team's memory")
 
-System(agenthive, "AgentHive", "Shared, reviewed memory graph for a team of coding agents - team/agent/task scoped, bounded retrieval by traversal, disclosed in layers")
+System(agenthive, "AgentHive", "Shared, reviewed memory graph for a team of coding agents - team/agent/task scoped, bounded retrieval by traversal, disclosed in layers, and able to propose its own improvements from how it has been used")
 
 System_Ext(coding_agent, "Coding Agent Session", "Claude Code, Cursor, or any agent runtime - retrieves team context at session start and logs what it learned at session end")
 System_Ext(session_hook, "Session-End Hook", "A harness lifecycle hook, outside the agent's own loop. Fires whether or not the agent remembered to log, so a crashed or truncated session still leaves a trace")
@@ -15,9 +15,9 @@ System_Ext(otel_backend, "OTLP Backend", "Jaeger, Tempo, or any OTLP/HTTP-compat
 System_Ext(prometheus, "Prometheus", "Scrapes token-reduction, disclosure-mode, cache-reuse and graph-growth metrics on an interval")
 
 Rel(member, coding_agent, "Runs")
-Rel(coding_agent, agenthive, "retrieve_context, or retrieve_index then fetch_nodes / log_session", "HTTPS/JSON")
+Rel(coding_agent, agenthive, "retrieve_context or retrieve_index then fetch_nodes / report_gaps / log_session", "HTTPS/JSON")
 Rel(session_hook, agenthive, "Records an unsummarised session when the agent logged nothing", "HTTPS/JSON")
-Rel(admin, agenthive, "Reviews pending memory, manages users, configures auto-approve rules", "HTTPS")
+Rel(admin, agenthive, "Reviews pending memory, manages users, configures auto-approve rules, accepts or ignores the proposals it raises", "HTTPS")
 Rel(agenthive, otel_backend, "Exports one trace per request when tracing is enabled", "OTLP/HTTP")
 Rel(prometheus, agenthive, "Scrapes", "HTTP GET /metrics")
 
