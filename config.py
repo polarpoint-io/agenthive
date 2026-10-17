@@ -52,6 +52,24 @@ class Config:
     # listed here for visibility.
     token_prefix: str = "ah-"
 
+    # --- automatic rejection -------------------------------------------
+    # Rejection is the only half of the gate safe to automate. Its failure
+    # mode is a lost note somebody can write again; approval's failure
+    # mode is a bad memory visible to every agent on the team, forever.
+    # So: reject liberally, approve only on a rule a human wrote.
+    #
+    # Nothing is deleted either way - an auto-rejected node keeps its row,
+    # its reason, and an admin can still approve it.
+    #
+    # Duplicates default ON: an identical title AND identical body
+    # against something already approved is unambiguously redundant, and
+    # letting those through is how a review queue stops being read.
+    auto_reject_duplicates: bool = _bool("AGENTHIVE_AUTO_REJECT_DUPLICATES", True)
+    # Trivial bodies default OFF: "too short to be worth keeping" is a
+    # judgement call that belongs to a team, not to this default. Set a
+    # character count to turn it on.
+    auto_reject_body_under: int = _int("AGENTHIVE_AUTO_REJECT_BODY_UNDER", 0)
+
     # 0 (default) means tokens never expire on their own - the original
     # behavior, and still correct for a small team that rotates tokens by
     # hand. Set to expire new/rotated tokens automatically after this many

@@ -46,6 +46,13 @@ by a successful Azure AD sign-in - see oidc.py>  (see auth.py):
   GET  /teams/{team_id}/memory/pending       [member]
   POST /teams/{team_id}/memory/{id}/approve  [admin]
   POST /teams/{team_id}/memory/{id}/reject   [admin]
+  POST /teams/{team_id}/auto-reject-rules    [admin]    the half of the gate safe to automate
+  GET  /teams/{team_id}/memory/pending?order=triage [admin] queue ordered by what waits on it
+  GET  /teams/{team_id}/gaps                 [member]   what the team keeps failing to find
+  GET  /teams/{team_id}/suggestions/links    [admin]    edges the graph is missing
+  GET  /teams/{team_id}/suggestions/tiers    [admin]    promote/demote by actual use
+  GET  /teams/{team_id}/suggestions/rules    [admin]    auto-approve rules the gate's own history justifies
+  POST /teams/{team_id}/tiers/apply          [admin]    apply a tier proposal (the only write here)
   GET  /teams/{team_id}/memory/retrieve      [member]   retrieve_context read path
   POST /teams/{team_id}/memory/fetch         [member]   bodies for ids from an index retrieval
 
@@ -92,6 +99,7 @@ from cache import CACHE
 from config import CONFIG
 from db import Store
 import governance
+import insights
 from retrieval import filter_by_tags, project_index, retrieve, select_nodes
 
 STORE: Store = None  # set in main() / create_app()
@@ -178,16 +186,30 @@ ROUTES = [
 
     (re.compile(r"^/teams/(?P<team_id>[\w-]+)/memory$"), "POST", "create_memory", "member"),
     (re.compile(r"^/teams/(?P<team_id>[\w-]+)/memory/pending$"), "GET", "list_pending", "member"),
+    (re.compile(r"^/teams/(?P<team_id>[\w-]+)/memory/rejected$"), "GET", "list_rejected", "admin"),
     (re.compile(r"^/teams/(?P<team_id>[\w-]+)/memory/(?P<node_id>[\w-]+)/approve$"), "POST", "approve", "admin"),
     (re.compile(r"^/teams/(?P<team_id>[\w-]+)/memory/(?P<node_id>[\w-]+)/reject$"), "POST", "reject", "admin"),
     (re.compile(r"^/teams/(?P<team_id>[\w-]+)/memory/retrieve$"), "GET", "retrieve_endpoint", "member"),
     (re.compile(r"^/teams/(?P<team_id>[\w-]+)/memory/fetch$"), "POST", "fetch_endpoint", "member"),
+
+    (re.compile(r"^/teams/(?P<team_id>[\w-]+)/auto-reject-rules$"), "POST", "create_reject_rule", "admin"),
+    (re.compile(r"^/teams/(?P<team_id>[\w-]+)/auto-reject-rules$"), "GET", "list_reject_rules", "admin"),
+    (re.compile(r"^/teams/(?P<team_id>[\w-]+)/auto-reject-rules/(?P<rule_id>[\w-]+)$"), "DELETE", "delete_reject_rule", "admin"),
 
     (re.compile(r"^/teams/(?P<team_id>[\w-]+)/auto-approve-rules$"), "POST", "create_rule", "admin"),
     (re.compile(r"^/teams/(?P<team_id>[\w-]+)/auto-approve-rules$"), "GET", "list_rules", "admin"),
     (re.compile(r"^/teams/(?P<team_id>[\w-]+)/auto-approve-rules/(?P<rule_id>[\w-]+)$"), "DELETE", "delete_rule", "admin"),
 
     (re.compile(r"^/teams/(?P<team_id>[\w-]+)/metrics/summary$"), "GET", "team_metrics_summary", "admin"),
+
+    # The memory-processing layer (insights.py). Everything here is a
+    # PROPOSAL - read-only, nothing applied. /tiers/apply is the single
+    # exception and is admin-triggered, never automatic.
+    (re.compile(r"^/teams/(?P<team_id>[\w-]+)/gaps$"), "GET", "gaps", "member"),
+    (re.compile(r"^/teams/(?P<team_id>[\w-]+)/suggestions/links$"), "GET", "suggest_links", "admin"),
+    (re.compile(r"^/teams/(?P<team_id>[\w-]+)/suggestions/tiers$"), "GET", "suggest_tiers", "admin"),
+    (re.compile(r"^/teams/(?P<team_id>[\w-]+)/suggestions/rules$"), "GET", "suggest_rules", "admin"),
+    (re.compile(r"^/teams/(?P<team_id>[\w-]+)/tiers/apply$"), "POST", "apply_tiers", "admin"),
 ]
 
 
@@ -267,9 +289,15 @@ class Handler(BaseHTTPRequestHandler):
         nothing extra since the common case (agents) always hits it."""
         api_key = self.headers.get("X-API-Key", "")
         if not api_key:
+            metrics.record_auth_failure("missing_header")
             raise AuthError(401, "missing X-API-Key header")
         user = STORE.user_by_token(api_key) or STORE.session_by_token(api_key)
         if not user:
+            # The response stays one opaque message on purpose (see
+            # db.user_by_token). The reason goes to the metrics port
+            # instead, where distinguishing a TTL rollout from someone
+            # using a revoked token is the whole point.
+            metrics.record_auth_failure(STORE.classify_token_failure(api_key))
             raise AuthError(401, "invalid, expired, or revoked API key")
         return user
 
@@ -621,15 +649,50 @@ class Handler(BaseHTTPRequestHandler):
             if getattr(STORE, "last_auto_approve_blocked", False):
                 span.set_attribute("agenthive.auto_approve_blocked", True)
                 metrics.record_auto_approve_blocked()
-        metrics.record_write(auto_approved=bool(node.get("auto_approved")))
+            auto_rejected = getattr(STORE, "last_auto_reject_reason", None)
+            if auto_rejected:
+                span.set_attribute("agenthive.auto_rejected", True)
+                metrics.record_auto_reject(auto_rejected)
+        metrics.record_write(auto_approved=bool(node.get("auto_approved")),
+                             tags=node.get("tags"))
         if node["status"] == "approved" and CACHE is not None:
             with tracing.TRACER.start_as_current_span("cache.invalidate_team"):
                 CACHE.invalidate_team(params["team_id"])  # a new approved node changes the graph
         self._send(201, node)
         return 201
 
+    def h_list_rejected(self, params, query, user):
+        """What automation turned away, and why.
+
+        Auto-rejection is only defensible because nothing is destroyed -
+        the row keeps its reject_reason and an admin can approve it after
+        the fact. That is just a claim unless somewhere can show them,
+        which is here."""
+        self._send(200, {"rejected": STORE.list_rejected(params["team_id"])})
+        return 200
+
     def h_list_pending(self, params, query, user):
-        self._send(200, {"pending": STORE.list_pending(params["team_id"])})
+        """`?order=triage` sorts by what is WAITING on each node rather
+        than by age, and annotates each with the gap it would close.
+
+        Opt-in, so the review UI, client.py and any admin script keep
+        exactly the ordering they had. This automates the ORDER, which
+        makes a reviewer faster; it does not touch the verdict, which is
+        the part worth refusing to automate."""
+        team_id = params["team_id"]
+        pending = STORE.list_pending(team_id)
+        if ((query.get("order") or [""])[0] or "").lower() != "triage":
+            self._send(200, {"pending": pending})
+            return 200
+
+        with tracing.TRACER.start_as_current_span("insights.triage") as span:
+            misses = STORE.list_retrieval_misses(team_id, min_count=1, limit=200)
+            triaged = insights.triage_pending(pending, misses)
+            urgent = sum(1 for n in triaged if n["closes_gap"])
+            span.set_attribute("agenthive.pending_count", len(triaged))
+            span.set_attribute("agenthive.closes_gap_count", urgent)
+        metrics.record_proposals("triage", urgent)
+        self._send(200, {"pending": triaged, "closes_gap": urgent, "order": "triage"})
         return 200
 
     def h_approve(self, params, query, user):
@@ -641,7 +704,8 @@ class Handler(BaseHTTPRequestHandler):
             span.set_attribute("agenthive.memory_node_id", params["node_id"])
             span.set_attribute("agenthive.decision", "approved")
             updated = STORE.review(params["node_id"], True, body.get("reviewed_by") or user["name"])
-        metrics.record_review(approved=True)
+        metrics.record_review(approved=True,
+                              latency_seconds=updated.get("review_latency_seconds"))
         if CACHE is not None:
             with tracing.TRACER.start_as_current_span("cache.invalidate_team"):
                 CACHE.invalidate_team(params["team_id"])  # newly-approved node joins the graph
@@ -659,7 +723,8 @@ class Handler(BaseHTTPRequestHandler):
             updated = STORE.review(
                 params["node_id"], False, body.get("reviewed_by") or user["name"], body.get("reason", "")
             )
-        metrics.record_review(approved=False)
+        metrics.record_review(approved=False,
+                              latency_seconds=updated.get("review_latency_seconds"))
         self._send(200, updated)
         return 200
 
@@ -724,6 +789,15 @@ class Handler(BaseHTTPRequestHandler):
                 # Logged on the INDEX call, not deferred to the fetch. The
                 # titles were disclosed here; that is the access.
                 STORE.record_access(team_id, node_ids, user["id"])
+                # This anchor used to return nothing and now doesn't, so the
+                # gap is closed. Without this retrieval_misses only grows,
+                # report_gaps keeps asking for a note that now exists, and
+                # the loop can never be shown to have worked.
+                recovered = STORE.close_retrieval_miss(team_id, anchor)
+                if recovered:
+                    span.set_attribute("agenthive.gap_closed", True)
+                    span.set_attribute("agenthive.misses_recovered", recovered)
+                    metrics.record_gap_closed(recovered)
         else:
             with tracing.TRACER.start_as_current_span("access_log.record_miss") as span:
                 span.set_attribute("agenthive.anchor", anchor)
@@ -769,7 +843,136 @@ class Handler(BaseHTTPRequestHandler):
         self._send(200, result)
         return 200
 
+    # ---- memory processing: proposals from the graph's own use ----
+
+    def h_gaps(self, params, query, user):
+        """Member-level on purpose. An agent starting work should be able
+        to ask what this team keeps looking for and never finds - that is
+        the one piece of self-knowledge that changes what it writes at the
+        end of the session."""
+        team_id = params["team_id"]
+        min_count = int((query.get("min_count") or [2])[0])
+        with tracing.TRACER.start_as_current_span("insights.gaps") as span:
+            rows = STORE.list_retrieval_misses(team_id, min_count=1, limit=100)
+            gaps = insights.rank_gaps(rows, STORE.list_pending(team_id), min_count=min_count)
+            span.set_attribute("agenthive.gap_count", len(gaps))
+        metrics.record_proposals("gap", len(gaps))
+        self._send(200, {
+            "gaps": gaps,
+            "awaiting_review": sum(1 for g in gaps if g["awaiting_review"]),
+        })
+        return 200
+
+    def h_suggest_links(self, params, query, user):
+        team_id = params["team_id"]
+        min_shared = int((query.get("min_shared") or [insights.DEFAULT_MIN_SHARED])[0])
+        with tracing.TRACER.start_as_current_span("insights.links") as span:
+            pairs = STORE.co_access_pairs(team_id, min_shared=min_shared)
+            suggestions = insights.suggest_links(
+                pairs, STORE.approved_nodes(team_id), min_shared=min_shared)
+            span.set_attribute("agenthive.suggestion_count", len(suggestions))
+        metrics.record_proposals("link", len(suggestions))
+        self._send(200, {"min_shared": min_shared, "links": suggestions})
+        return 200
+
+    def h_suggest_tiers(self, params, query, user):
+        team_id = params["team_id"]
+        min_age_days = int((query.get("stale_after_days") or [90])[0])
+        with tracing.TRACER.start_as_current_span("insights.tiers") as span:
+            stats = STORE.node_access_stats(team_id)
+            changes = insights.propose_tiers(stats)
+            stale = insights.find_stale(stats, min_age_days=min_age_days)
+            span.set_attribute("agenthive.tier_changes", len(changes))
+        metrics.record_proposals("tier", len(changes))
+        metrics.record_proposals("stale", len(stale))
+        self._send(200, {
+            "changes": changes,
+            "stale": stale,
+            "stale_after_days": min_age_days,
+        })
+        return 200
+
+    def h_suggest_rules(self, params, query, user):
+        team_id = params["team_id"]
+        with tracing.TRACER.start_as_current_span("insights.rules") as span:
+            found = insights.mine_rules(
+                STORE.review_decisions(team_id),
+                STORE.list_auto_approve_rules(team_id, active_only=True),
+            )
+            span.set_attribute("agenthive.rule_candidates", len(found["rules"]))
+        metrics.record_proposals("rule", len(found["rules"]))
+        metrics.record_proposals("noisy", len(found["noisy"]))
+        self._send(200, found)
+        return 200
+
+    def h_apply_tiers(self, params, query, user):
+        """The only endpoint in this group that writes, and it writes
+        metadata about USE - never a word of a node's content. An admin
+        asks for it explicitly; nothing applies a proposal on its own."""
+        body = self._body()
+        changes = body.get("changes")
+        if not isinstance(changes, list) or not changes:
+            raise ValueError("changes must be a non-empty list of {id, proposed_tier}")
+        if len(changes) > 500:
+            raise ValueError("at most 500 tier changes per call")
+        team_id = params["team_id"]
+
+        allowed = {"L1", "L2", "L3"}
+        applied, skipped = [], []
+        with tracing.TRACER.start_as_current_span("insights.apply_tiers") as span:
+            for change in changes:
+                node_id = str(change.get("id") or "")
+                tier = str(change.get("proposed_tier") or "")
+                if not node_id or tier not in allowed:
+                    skipped.append({"id": node_id, "reason": "invalid tier"})
+                    continue
+                # Direction is read from the proposal rather than recomputed:
+                # the caller is applying a specific suggestion, and deriving
+                # it here would need the node's current tier back out of the
+                # database for a label the proposal already carries.
+                direction = change.get("direction")
+                if direction not in ("promote", "demote"):
+                    direction = None
+                # Scoped by team in the UPDATE itself, so an id belonging
+                # to another team changes nothing and reports nothing.
+                STORE.set_node_tier(team_id, node_id, tier)
+                applied.append({"id": node_id, "tier": tier, "direction": direction})
+            span.set_attribute("agenthive.tiers_applied", len(applied))
+        metrics.record_tier_changes(applied)
+
+        if applied and CACHE is not None:
+            with tracing.TRACER.start_as_current_span("cache.invalidate_team"):
+                CACHE.invalidate_team(team_id)  # tier rides along in retrieval results
+        self._send(200, {"applied": applied, "skipped": skipped})
+        return 200
+
     # ---- auto-approve rules ----
+
+    def h_create_reject_rule(self, params, query, user):
+        """Rejection is the half of the gate safe to automate: its
+        failure mode is a lost note somebody can write again, where
+        approval's is a bad memory visible to every agent forever.
+
+        Nothing is deleted - an auto-rejected node keeps its row and its
+        reason, and an admin can still approve it afterwards."""
+        body = self._body()
+        rule = STORE.create_auto_reject_rule(
+            params["team_id"], created_by=user["name"],
+            match_tag=body.get("match_tag"), match_agent_id=body.get("match_agent_id"),
+            reason=body.get("reason", ""),
+        )
+        self._send(201, rule)
+        return 201
+
+    def h_list_reject_rules(self, params, query, user):
+        self._send(200, {"rules": STORE.list_auto_reject_rules(
+            params["team_id"], active_only=False)})
+        return 200
+
+    def h_delete_reject_rule(self, params, query, user):
+        STORE.deactivate_auto_reject_rule(params["team_id"], params["rule_id"])
+        self._send(200, {"id": params["rule_id"], "active": False})
+        return 200
 
     def h_create_rule(self, params, query, user):
         body = self._body()

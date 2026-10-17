@@ -271,6 +271,101 @@ Treating a malformed tag as literal text would store exactly the content
 the author was trying to withhold, which is the wrong way round for a
 failure nobody will notice.
 
+## What the graph learns about its own use
+
+AgentHive has always recorded the signals needed to improve itself and
+never acted on any of them. `memory_access_log` knows which nodes get
+served together and to whom. `retrieval_misses` knows what people keep
+looking for and never find. Every approve and reject is a
+human-labelled example of what this team wants kept. All of it used to
+terminate in a dashboard.
+
+`insights.py` turns those signals into **proposals**. Four of them:
+
+```python
+client.report_gaps()        # [member] anchors that keep missing
+admin.suggest_links()       # nodes retrieved together but not linked
+admin.suggest_tiers()       # promote/demote by actual use, plus a prune list
+admin.suggest_rules()       # auto-approve rules your own decisions justify
+```
+
+### Gaps
+
+The only one at member level, because it is the one that changes what an
+agent does. Called at session start next to `retrieve_context`, it says
+what this team has searched for repeatedly and come back empty on - so a
+session that happens to learn one of those things knows its
+`log_session` closes a standing gap. Entries marked `awaiting_review`
+already have an answer sitting unapproved, where the fix is a human
+clearing the queue rather than anyone writing it twice.
+
+### Links
+
+Retrieval here is traversal over links, so a missing edge is a node that
+cannot be reached from an anchor it genuinely relates to. Nodes the same
+retrievals keep returning together, and that are not linked, are
+candidate edges. Pairs already linked in either direction are dropped,
+since adjacency is built bidirectionally.
+
+### Tiers
+
+`tier` has been on every node since the first schema and has never been
+anything but its default. It now records use: three different teammates
+and five retrievals earns `L3`, any reuse at all earns `L2`. Computed
+from current stats rather than ratcheted, so a node that was useful last
+quarter and is dead now drops back on its own. That matters - a graph
+that only grows gets quietly worse at answering, and the failure mode is
+a slightly worse neighbourhood rather than an error anybody notices.
+`stale` lists nodes approved long ago and never once retrieved.
+
+`POST /teams/{id}/tiers/apply` is the only endpoint in this group that
+writes, it is admin-triggered, and tier is metadata about how a node is
+*used* - never a word of its content.
+
+### Rules
+
+An auto-approve rule currently has to be written by hand. Your gate has
+been generating the evidence for them all along: a tag approved 40 times
+out of 40 is a rule somebody should have written months ago. `rules` are
+candidates to create; `noisy` is the inverse, naming agents whose writes
+are mostly rejected, where the fix is upstream in that agent's prompt
+rather than anywhere in the review queue.
+
+Reserved tags are never proposed however good the record. A
+`security_alert` gets a human regardless of how routine it has looked so
+far, and a mined rule overriding that would quietly undo the guardrail.
+Auto-approved nodes are excluded from the evidence entirely, because
+counting a rule's own output as justification would let one hasty rule
+license its successors.
+
+### Does any of it work?
+
+`GET /metrics` answers that, including when the answer is no.
+`agenthive_gaps_closed_total` counts anchors that used to return nothing
+and now return something, which is the loop doing its job;
+`agenthive_proposals_raised_total` climbing while
+`agenthive_tier_changes_applied_total` stays flat is the loop being
+ignored, which is the likelier failure and the one that errors nowhere.
+See [`observability/README.md`](observability/README.md) for the queries
+and for what these numbers deliberately do not claim.
+
+A closed gap also stops being a gap: once an anchor returns something,
+its miss row is cleared, so `report_gaps` stops asking anyone to write a
+note that now exists.
+
+### Two constraints this layer is built around
+
+**No model.** Everything here is arithmetic over rows. Nothing calls an
+LLM, because the moment AgentHive calls one it becomes the proxy its
+[`ADR.md`](ADR.md) exists to avoid, and memory that rewrites itself with
+a model is memory you can no longer audit.
+
+**Proposals, not actions.** Nothing applies itself. That is not
+timidity: self-improving memory is a known attack surface, since
+poisoning what gets consolidated poisons every future retrieval. The
+approval gate is the defence, and a suggestion that applied itself would
+route around the one control that makes this system trustworthy.
+
 ## Reviewing pending memory
 
 Open `http://127.0.0.1:8790/ui` in a browser (or wherever you've deployed
@@ -287,6 +382,88 @@ admin.approve(node_id)
 # or
 admin.reject(node_id, reason="not ready, needs discussion")
 ```
+
+## Automating the review gate
+
+Only half of it, and deliberately.
+
+**Rejection is safe to automate.** Its failure mode is a lost note
+somebody can write again. **Approval is not.** Its failure mode is a bad
+memory visible to every agent on the team for as long as it stays
+approved, and poisoning what gets consolidated poisons every future
+retrieval. So: reject liberally, approve only on a rule a human wrote.
+
+Nothing is deleted either way. An auto-rejected node keeps its row and
+its reason, `GET /teams/{id}/memory/rejected` shows them, and an admin
+can still approve one afterwards. Recoverability you cannot reach would
+be deletion with extra steps.
+
+### Deterministic rejection
+
+Two checks, no rule needed:
+
+| Check | Default | Setting |
+|---|---|---|
+| Identical title **and** body to something already approved | on | `AGENTHIVE_AUTO_REJECT_DUPLICATES` |
+| Body shorter than N characters | off | `AGENTHIVE_AUTO_REJECT_BODY_UNDER` |
+
+Duplicates default on because identical content is unambiguously
+redundant. The key is title *and* body on purpose: an agent relogging a
+title with a better body is an improvement, and treating that as a
+duplicate would discard the improvement and keep the weaker note.
+
+Trivial bodies default off because "too short to keep" is a judgement
+that belongs to a team, not to this default.
+
+### Reject rules
+
+```python
+admin.create_auto_reject_rule(match_agent_id=agent["id"],
+                              reason="prompt needs fixing")
+admin.create_auto_reject_rule(match_tag="scratch")
+```
+
+Same shape as auto-approve rules, opposite direction. When a node
+matches both, **rejection wins** - that is a configuration error either
+way, and resolving it toward "does not enter the graph" is the
+conservative reading.
+
+Reserved tags are beyond automation in *both* directions: auto-approving
+a `security_alert` hides it, auto-rejecting one discards it, and both
+are worse than a slow queue.
+
+### Triage
+
+The queue is otherwise a flat list by age, which is the wrong order the
+moment it has anything in it.
+
+```python
+admin.list_pending_triaged()
+```
+
+Sorts by what is *waiting* on each node, annotating each with
+`closes_gap` and `gap_miss_count` - how many times somebody searched for
+this and found nothing. A node answering an anchor missed nine times
+comes ahead of forty older backstop nodes.
+
+Everything still comes back; only the order and the annotations change,
+and the default ordering is untouched for existing callers. Automating
+the **order** makes a reviewer faster. Automating the **verdict** is the
+part worth refusing.
+
+### What is deliberately not here
+
+No LLM reviewer. The moment a model decides what enters shared memory,
+the gate becomes one model judging another's output with no human in the
+loop, and memory stops being something you can audit. `ADR.md` covers
+why that line is where it is.
+
+Read `agenthive_review_latency_seconds` and
+`agenthive_oldest_pending_age_seconds` before reaching for any of this.
+A p50 of minutes with near-total approval means the gate is already
+ceremony and the answer is more auto-approve rules, not more automation.
+An oldest-pending climbing into days means the answer is auto-reject
+plus triage. Those are different problems.
 
 ## Auto-approve rules (admin only)
 

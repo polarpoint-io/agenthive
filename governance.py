@@ -41,6 +41,12 @@ RESERVED_TAGS = frozenset({"decision", "bugfix", "security_alert", "sensitive"})
 
 NEVER_AUTO_APPROVE = frozenset({"security_alert", "sensitive"})
 
+# The same set, named for what it means on the rejection side. A
+# security_alert must reach a human whichever direction the automation
+# would have sent it: auto-approving one hides it, and auto-rejecting one
+# discards it, and both are worse than a slow queue.
+ALWAYS_HUMAN = NEVER_AUTO_APPROVE
+
 _PRIVATE_BLOCK = re.compile(r"<private>.*?</private>", re.DOTALL | re.IGNORECASE)
 _PRIVATE_UNCLOSED = re.compile(r"<private>.*\Z", re.DOTALL | re.IGNORECASE)
 
@@ -65,3 +71,31 @@ def strip_private(text: str) -> tuple:
     cleaned, closed = _PRIVATE_BLOCK.subn(REDACTION_MARKER, text)
     cleaned, unclosed = _PRIVATE_UNCLOSED.subn(REDACTION_MARKER, cleaned)
     return cleaned, closed + unclosed
+
+
+def needs_human(tags) -> bool:
+    """True when this node's tags put it beyond any automatic decision,
+    in either direction. See ALWAYS_HUMAN."""
+    return bool(ALWAYS_HUMAN & {str(t).strip().lower() for t in (tags or [])})
+
+
+def trivial_body(body: str, min_chars: int) -> bool:
+    """True when there is not enough here to be worth a reviewer's time.
+
+    Measured after stripping whitespace and redaction markers, so a node
+    whose entire content was <private> does not pass as substantial on
+    the strength of the marker left behind."""
+    if not min_chars or min_chars <= 0:
+        return False
+    cleaned = (body or "").replace(REDACTION_MARKER, "").strip()
+    return len(cleaned) < min_chars
+
+
+def normalise_for_duplicate(title: str, body: str) -> str:
+    """Key for exact-duplicate detection.
+
+    Title AND body, both normalised for case and surrounding whitespace.
+    Title alone would be wrong: an agent relogging the same title with a
+    better body is an improvement, and discarding it as a duplicate
+    would lose the improvement and leave the weaker note in place."""
+    return (title or "").strip().lower() + "\x00" + " ".join((body or "").split()).lower()

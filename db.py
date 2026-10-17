@@ -111,6 +111,22 @@ CREATE INDEX IF NOT EXISTS idx_memory_team_title
 -- number (distinct users per node) instead of an assertion. retrieval_id
 -- groups the rows from one call so "total retrievals" is a COUNT(DISTINCT),
 -- not a row count.
+-- Mirror of auto_approve_rules, for the other direction. A separate
+-- table rather than a `decision` column on that one: this schema has no
+-- migration runner beyond a couple of hand-written ALTERs in
+-- SqliteBackend, and CREATE TABLE IF NOT EXISTS is the only change that
+-- applies cleanly to an existing database on BOTH backends.
+CREATE TABLE IF NOT EXISTS auto_reject_rules (
+    id TEXT PRIMARY KEY,
+    team_id TEXT NOT NULL REFERENCES teams(id),
+    match_tag TEXT,
+    match_agent_id TEXT,
+    reason TEXT NOT NULL DEFAULT '',
+    created_by TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    active INTEGER NOT NULL DEFAULT 1
+);
+
 CREATE TABLE IF NOT EXISTS memory_access_log (
     id TEXT PRIMARY KEY,
     team_id TEXT NOT NULL REFERENCES teams(id),
@@ -173,6 +189,24 @@ def new_id() -> str:
 
 def now() -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+
+def _age_seconds(stamp: str) -> float:
+    """Seconds between an ISO stamp written by now() and the present.
+
+    now() emits a trailing "Z", which fromisoformat only parses from
+    3.11 - the replace keeps this working on 3.10 too. Returns 0.0
+    rather than raising on anything unparseable: a metric must never be
+    the reason a request or a scrape fails."""
+    import datetime
+
+    try:
+        parsed = datetime.datetime.fromisoformat(str(stamp).replace("Z", "+00:00"))
+    except (ValueError, TypeError):
+        return 0.0
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=datetime.timezone.utc)
+    return (datetime.datetime.now(datetime.timezone.utc) - parsed).total_seconds()
 
 
 def _token_expiry() -> str | None:
@@ -633,6 +667,58 @@ class Store:
             (rule_id, team_id),
         )
 
+    def create_auto_reject_rule(self, team_id: str, created_by: str,
+                                 match_tag: str = None, match_agent_id: str = None,
+                                 reason: str = "") -> dict:
+        if not match_tag and not match_agent_id:
+            raise ValueError("an auto-reject rule needs match_tag or match_agent_id")
+        rule_id = new_id()
+        self.backend.execute(
+            "INSERT INTO auto_reject_rules "
+            "(id, team_id, match_tag, match_agent_id, reason, created_by, created_at, active) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, 1)",
+            (rule_id, team_id, match_tag, match_agent_id, reason or "", created_by, now()),
+        )
+        return self.get_auto_reject_rule(rule_id)
+
+    def get_auto_reject_rule(self, rule_id: str):
+        row = self.backend.query_one("SELECT * FROM auto_reject_rules WHERE id = ?", (rule_id,))
+        return dict(row) if row else None
+
+    def list_auto_reject_rules(self, team_id: str, active_only: bool = True):
+        sql = "SELECT * FROM auto_reject_rules WHERE team_id = ?"
+        if active_only:
+            sql += " AND active = 1"
+        return [dict(r) for r in self.backend.query_all(sql + " ORDER BY created_at", (team_id,))]
+
+    def deactivate_auto_reject_rule(self, team_id: str, rule_id: str) -> None:
+        self.backend.execute(
+            "UPDATE auto_reject_rules SET active = 0 WHERE id = ? AND team_id = ?",
+            (rule_id, team_id),
+        )
+
+    def find_matching_reject_rule(self, team_id: str, tags, agent_id):
+        tags = {str(t).strip().lower() for t in (tags or [])}
+        for rule in self.list_auto_reject_rules(team_id):
+            if rule["match_tag"] and str(rule["match_tag"]).strip().lower() in tags:
+                return rule
+            if rule["match_agent_id"] and rule["match_agent_id"] == agent_id:
+                return rule
+        return None
+
+    def find_approved_duplicate(self, team_id: str, title: str, body: str):
+        """An approved node with identical title AND body.
+
+        Compared in Python rather than SQL so normalisation matches
+        governance.normalise_for_duplicate exactly - a LOWER()/TRIM()
+        pair would drift from it the first time either changes, and the
+        two disagreeing is how a duplicate check silently stops working."""
+        key = governance.normalise_for_duplicate(title, body)
+        for node in self.approved_nodes(team_id):
+            if governance.normalise_for_duplicate(node["title"], node["body"]) == key:
+                return node
+        return None
+
     def find_matching_rule(self, team_id: str, tags, agent_id):
         rules = self.list_auto_approve_rules(team_id, active_only=True)
         tags = set(tags or [])
@@ -652,28 +738,72 @@ class Store:
         tags = tags or []
         links_list = links or []
 
-        # A reserved tag outranks any rule that would have matched - checked
-        # here rather than inside find_matching_rule so a rule that matched on
-        # agent_id is caught too, which a tag-only check inside the matcher
-        # would have waved through. See governance.NEVER_AUTO_APPROVE.
-        rule = self.find_matching_rule(team_id, tags, agent_id)
+        # ---- the automatic decision, in strict precedence order ----
+        #
+        # 1. A reserved tag outranks everything. security_alert and
+        #    sensitive reach a human whichever way automation would have
+        #    sent them: auto-approving one hides it, auto-rejecting one
+        #    discards it, and both beat a slow queue only in the sense
+        #    that nobody notices.
+        # 2. Rejection beats approval when both match. That is a config
+        #    error either way, and resolving it toward "does not enter
+        #    the graph" is the conservative reading.
+        # 3. Deterministic checks (duplicate, trivial) before rules, so a
+        #    redundant node is rejected for the reason that is actually
+        #    true rather than whichever rule happened to catch it.
+        #
+        # Checked here rather than inside the matchers so a rule that
+        # matched on agent_id is caught too - a tag-only check inside
+        # find_matching_rule would have waved that through.
+        from config import CONFIG
+
         self.last_auto_approve_blocked = False
-        if rule is not None and governance.blocks_auto_approve(tags):
-            rule = None
-            self.last_auto_approve_blocked = True
-        status = "approved" if rule else "pending"
-        reviewed_at = now() if rule else None
-        reviewed_by = f"auto-approve:{rule['id']}" if rule else None
+        self.last_auto_reject_reason = None
+        human_only = governance.needs_human(tags)
+
+        reject_reason = None
+        if not human_only:
+            if CONFIG.auto_reject_duplicates:
+                duplicate = self.find_approved_duplicate(team_id, title, body)
+                if duplicate is not None:
+                    reject_reason = f"auto: identical to approved node {duplicate['id']}"
+            if reject_reason is None and governance.trivial_body(
+                    body, CONFIG.auto_reject_body_under):
+                reject_reason = (
+                    f"auto: body under {CONFIG.auto_reject_body_under} characters")
+            if reject_reason is None:
+                reject_rule = self.find_matching_reject_rule(team_id, tags, agent_id)
+                if reject_rule is not None:
+                    detail = reject_rule["reason"] or "matched an auto-reject rule"
+                    reject_reason = f"auto-reject:{reject_rule['id']} {detail}"
+
+        rule = None
+        if reject_reason is None:
+            rule = self.find_matching_rule(team_id, tags, agent_id)
+            if rule is not None and human_only:
+                rule = None
+                self.last_auto_approve_blocked = True
+
+        if reject_reason is not None:
+            self.last_auto_reject_reason = reject_reason
+            status = "rejected"
+            reviewed_at = now()
+            reviewed_by = "auto"
+        else:
+            status = "approved" if rule else "pending"
+            reviewed_at = now() if rule else None
+            reviewed_by = f"auto-approve:{rule['id']}" if rule else None
 
         self.backend.execute(
             "INSERT INTO memory_nodes "
             "(id, team_id, agent_id, task_id, tier, title, body, tags, links, status, "
-            " created_at, reviewed_at, reviewed_by, auto_approved, rule_id) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            " created_at, reviewed_at, reviewed_by, auto_approved, rule_id, reject_reason) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (node_id, team_id, agent_id, task_id, tier, title, body,
              json.dumps(tags), json.dumps(links_list), status,
              now(), reviewed_at, reviewed_by,
-             1 if rule else 0, rule["id"] if rule else None),
+             1 if rule else 0, rule["id"] if rule else None,
+             reject_reason or ""),
         )
         return self.get_memory(node_id)
 
@@ -696,7 +826,25 @@ class Store:
             "reject_reason = ? WHERE id = ?",
             (status, now(), reviewed_by, reason, node_id),
         )
-        return self.get_memory(node_id)
+        node = self.get_memory(node_id)
+        if node:
+            node["review_latency_seconds"] = _age_seconds(node.get("created_at"))
+        return node
+
+    def list_rejected(self, team_id: str, limit: int = 200):
+        """Rejected nodes, newest first, with the reason.
+
+        Without this, "an auto-rejected node is recoverable, an admin can
+        still approve it" is a claim with no way to act on it - the node
+        is invisible to retrieval and absent from the pending queue, so
+        nothing in the product can show it to anyone. Recoverability you
+        cannot reach is deletion with extra steps."""
+        rows = self.backend.query_all(
+            "SELECT * FROM memory_nodes WHERE team_id = ? AND status = 'rejected' "
+            "ORDER BY reviewed_at DESC LIMIT ?",
+            (team_id, limit),
+        )
+        return [_row_to_node(r) for r in rows]
 
     def approved_nodes(self, team_id: str):
         rows = self.backend.query_all(
@@ -741,6 +889,128 @@ class Store:
             "last_user_id = excluded.last_user_id, "
             "last_missed_at = excluded.last_missed_at",
             (team_id, key, display, user_id, now()),
+        )
+
+    def close_retrieval_miss(self, team_id: str, anchor: str) -> int:
+        """A previously-missing anchor just returned something. Clear the
+        gap and report how many misses it had accumulated.
+
+        Without this, retrieval_misses only ever grows: an anchor stays
+        on the gap list after somebody fills it, report_gaps keeps
+        telling agents to write a note that now exists, and the headline
+        "is this loop working" question has no answer because closure is
+        never observed.
+
+        A SELECT before the DELETE on purpose. This runs on every
+        successful retrieval, and the overwhelmingly common case is "no
+        miss row", which should cost one indexed PK read and no write at
+        all rather than a lock on the hot read path."""
+        from retrieval import slug
+
+        key = slug(anchor)[:200]
+        if not key:
+            return 0
+        row = self.backend.query_one(
+            "SELECT miss_count FROM retrieval_misses WHERE team_id = ? AND anchor_key = ?",
+            (team_id, key),
+        )
+        if not row:
+            return 0
+        self.backend.execute(
+            "DELETE FROM retrieval_misses WHERE team_id = ? AND anchor_key = ?",
+            (team_id, key),
+        )
+        return row["miss_count"] or 0
+
+    # ---- signals for the memory-processing layer (see insights.py) ----
+    #
+    # All read-only, all plain SQL that runs identically on SQLite and
+    # Postgres. The analysis itself lives in insights.py as pure
+    # functions over these rows, so it can be tested without a database.
+
+    def list_retrieval_misses(self, team_id: str, min_count: int = 1, limit: int = 50):
+        """Anchors that returned nothing, most-missed first.
+
+        Already aggregated per (team, anchor_key) by
+        record_retrieval_miss, so this is the gap signal in its final
+        form - no scan of a per-call log."""
+        return self.backend.query_all(
+            "SELECT anchor, anchor_key, miss_count, last_missed_at "
+            "FROM retrieval_misses WHERE team_id = ? AND miss_count >= ? "
+            "ORDER BY miss_count DESC, last_missed_at DESC LIMIT ?",
+            (team_id, min_count, limit),
+        )
+
+    def co_access_pairs(self, team_id: str, min_shared: int = 2, limit: int = 100):
+        """Pairs of nodes returned by the SAME retrieval, N times or more.
+
+        record_access writes one row per node under a shared
+        retrieval_id precisely so this self-join is possible. The
+        `a.node_id < b.node_id` predicate both dedupes the pair and
+        drops the self-match, so each unordered pair appears once."""
+        return self.backend.query_all(
+            "SELECT a.node_id as a_id, b.node_id as b_id, "
+            "       COUNT(DISTINCT a.retrieval_id) as shared "
+            "FROM memory_access_log a "
+            "JOIN memory_access_log b "
+            "  ON a.retrieval_id = b.retrieval_id AND a.node_id < b.node_id "
+            "WHERE a.team_id = ? AND b.team_id = ? "
+            "GROUP BY a.node_id, b.node_id "
+            "HAVING COUNT(DISTINCT a.retrieval_id) >= ? "
+            "ORDER BY shared DESC LIMIT ?",
+            (team_id, team_id, min_shared, limit),
+        )
+
+    def node_access_stats(self, team_id: str):
+        """Per approved node: how often, by how many people, how recently.
+
+        LEFT JOIN on purpose - a node nobody has ever retrieved is the
+        most interesting row here, and an INNER JOIN would hide exactly
+        those. Every non-aggregated column is in GROUP BY so this is
+        valid on Postgres as well as SQLite."""
+        return self.backend.query_all(
+            "SELECT n.id, n.title, n.tier, n.created_at, "
+            "       COUNT(DISTINCT a.retrieval_id) as access_count, "
+            "       COUNT(DISTINCT a.user_id) as distinct_users, "
+            "       MAX(a.accessed_at) as last_accessed_at "
+            "FROM memory_nodes n "
+            "LEFT JOIN memory_access_log a ON a.node_id = n.id "
+            "WHERE n.team_id = ? AND n.status = 'approved' "
+            "GROUP BY n.id, n.title, n.tier, n.created_at",
+            (team_id,),
+        )
+
+    def review_decisions(self, team_id: str):
+        """Every node a human (or a rule) has already ruled on.
+
+        This is the labelled data the approval gate produces for free and
+        nothing currently reads. auto_approved is carried so rule mining
+        can exclude decisions a rule already made - counting those as
+        evidence for the rule that made them is circular."""
+        rows = self.backend.query_all(
+            "SELECT id, agent_id, tags, status, auto_approved, rule_id "
+            "FROM memory_nodes WHERE team_id = ? AND status IN ('approved', 'rejected')",
+            (team_id,),
+        )
+        out = []
+        for row in rows:
+            out.append({
+                "id": row["id"],
+                "agent_id": row["agent_id"],
+                "tags": json.loads(row["tags"]) if row["tags"] else [],
+                "status": row["status"],
+                "auto_approved": bool(row["auto_approved"]),
+                "rule_id": row["rule_id"],
+            })
+        return out
+
+    def set_node_tier(self, team_id: str, node_id: str, tier: str) -> None:
+        """Tier is metadata about how a node is USED, never its content.
+        Scoped by team_id as well as id so a stray id cannot reach
+        across a team boundary."""
+        self.backend.execute(
+            "UPDATE memory_nodes SET tier = ? WHERE id = ? AND team_id = ?",
+            (tier, node_id, team_id),
         )
 
     def team_metrics_summary(self, team_id: str) -> dict:
@@ -825,6 +1095,61 @@ class Store:
             "SELECT status, COUNT(*) as n FROM memory_nodes GROUP BY status"
         )
         return {r["status"]: r["n"] for r in rows}
+
+    def global_oldest_pending_age_seconds(self) -> float:
+        """Age of the longest-waiting unreviewed node, across all teams.
+
+        The single most important operational number in this system and
+        it has never been exposed. Pending memory is INVISIBLE to
+        retrieval, so a backed-up queue degrades every agent's context
+        silently - no error, no failed request, just worse answers. This
+        is what you alert on."""
+        row = self.backend.query_one(
+            "SELECT MIN(created_at) as oldest FROM memory_nodes WHERE status = 'pending'"
+        )
+        if not row or not row["oldest"]:
+            return 0.0
+        return max(_age_seconds(row["oldest"]), 0.0)
+
+    def classify_token_failure(self, token: str) -> str:
+        """Why a token was rejected: revoked | expired | unknown.
+
+        Called ONLY on the failure path, so the extra query costs nothing
+        on a healthy request. The distinction deliberately never reaches
+        the HTTP response - user_by_token keeps returning a single opaque
+        failure so an attacker probing a stolen token learns nothing (see
+        its docstring). A metric is a different audience: it is on the
+        metrics port, scraped by Prometheus, and a spike in `expired`
+        versus `revoked` is the difference between a TTL rollout biting
+        and someone using a token you killed."""
+        from auth import hash_token
+
+        row = self.backend.query_one(
+            "SELECT revoked_at, token_expires_at FROM users WHERE token_hash = ?",
+            (hash_token(token),),
+        )
+        if not row:
+            return "unknown"
+        if row["revoked_at"]:
+            return "revoked"
+        if row["token_expires_at"] and row["token_expires_at"] <= now():
+            return "expired"
+        return "unknown"
+
+    def global_tier_counts(self) -> dict:
+        """Approved nodes by tier. The slope of this is what "the graph
+        is stratifying by use" looks like; a flat all-L1 line means the
+        tier proposals are being generated and ignored."""
+        rows = self.backend.query_all(
+            "SELECT tier, COUNT(*) as n FROM memory_nodes "
+            "WHERE status = 'approved' GROUP BY tier"
+        )
+        return {r["tier"] or "L1": r["n"] for r in rows}
+
+    def global_open_gap_count(self) -> int:
+        """Distinct anchors currently missing, across all teams."""
+        row = self.backend.query_one("SELECT COUNT(*) as n FROM retrieval_misses")
+        return row["n"] if row else 0
 
     def global_active_user_count(self) -> int:
         row = self.backend.query_one("SELECT COUNT(*) as n FROM users WHERE revoked_at IS NULL")

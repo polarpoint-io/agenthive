@@ -125,6 +125,54 @@ class TeamMemoryClient:
             body={"ids": list(ids)}, span_name="fetch_nodes",
         )
 
+    def report_gaps(self, min_count: int = 2) -> dict:
+        """What this team keeps looking for and never finds.
+
+        Worth calling at the START of a session alongside
+        retrieve_context: if the thing you are about to work on is on
+        this list, the team has been missing it repeatedly and your
+        log_session at the end is the fix."""
+        return self._request(
+            "GET", "/teams/" + self._team_id() + "/gaps",
+            query={"min_count": min_count}, span_name="report_gaps",
+        )
+
+    # ---- admin: proposals from the graph's own use (see insights.py) ----
+
+    def suggest_links(self, min_shared: int = 3) -> dict:
+        """Nodes repeatedly retrieved together but not linked."""
+        return self._request(
+            "GET", "/teams/" + self._team_id() + "/suggestions/links",
+            query={"min_shared": min_shared}, span_name="suggest_links",
+        )
+
+    def suggest_tiers(self, stale_after_days: int = 90) -> dict:
+        """Tier changes earned by actual use, plus a prune list."""
+        return self._request(
+            "GET", "/teams/" + self._team_id() + "/suggestions/tiers",
+            query={"stale_after_days": stale_after_days}, span_name="suggest_tiers",
+        )
+
+    def suggest_rules(self) -> dict:
+        """Auto-approve rules this team's own approve/reject history
+        justifies, and the inverse: writers whose output keeps getting
+        rejected."""
+        return self._request(
+            "GET", "/teams/" + self._team_id() + "/suggestions/rules",
+            span_name="suggest_rules",
+        )
+
+    def apply_tiers(self, changes) -> dict:
+        """Apply tier proposals. Admin-triggered, never automatic.
+
+        Pass the proposal dicts through unchanged - they carry
+        `direction`, which is what lets the server tell a promotion from
+        a demotion in agenthive_tier_changes_applied_total."""
+        return self._request(
+            "POST", "/teams/" + self._team_id() + "/tiers/apply",
+            body={"changes": list(changes)}, span_name="apply_tiers",
+        )
+
     def log_session(self, title: str, body: str, agent_id: str = None,
                      task_id: str = None, tags=None, links=None, tier: str = "L1") -> dict:
         """Call at the end of a session. Writes a memory node - PENDING
@@ -192,6 +240,43 @@ class TeamMemoryClient:
         )
 
     # ---- auto-approve rules ----
+
+    def list_rejected(self) -> dict:
+        """What was turned away and why, including by automation. The
+        node keeps its row, so approve() still works on it."""
+        return self._request("GET", "/teams/" + self._team_id() + "/memory/rejected")
+
+    def list_pending_triaged(self) -> dict:
+        """The review queue ordered by what is waiting on it, not by age.
+
+        Each node gains `closes_gap` and `gap_miss_count`: how many times
+        somebody searched for this and found nothing. Everything still
+        comes back - only the order and the annotations change."""
+        return self._request(
+            "GET", "/teams/" + self._team_id() + "/memory/pending",
+            query={"order": "triage"}, span_name="list_pending_triaged",
+        )
+
+    def create_auto_reject_rule(self, match_tag: str = None,
+                                 match_agent_id: str = None, reason: str = "") -> dict:
+        """Reject without a human. Safe to automate in a way approval is
+        not: a lost note can be written again, where a bad approved
+        memory is visible to every agent on the team.
+
+        Nothing is deleted - the node keeps its row and its reason, and
+        an admin can still approve it afterwards."""
+        return self._request(
+            "POST", "/teams/" + self._team_id() + "/auto-reject-rules",
+            body={"match_tag": match_tag, "match_agent_id": match_agent_id,
+                  "reason": reason},
+        )
+
+    def list_auto_reject_rules(self) -> dict:
+        return self._request("GET", "/teams/" + self._team_id() + "/auto-reject-rules")
+
+    def delete_auto_reject_rule(self, rule_id: str) -> dict:
+        return self._request(
+            "DELETE", "/teams/" + self._team_id() + "/auto-reject-rules/" + rule_id)
 
     def create_auto_approve_rule(self, match_tag: str = None, match_agent_id: str = None) -> dict:
         return self._request(

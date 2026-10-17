@@ -13,15 +13,15 @@ System_Ext(otel_backend, "OTLP Backend", "Jaeger, Tempo, or any OTLP/HTTP-compat
 System_Ext(prometheus, "Prometheus", "Scrapes on an interval")
 
 System_Boundary(agenthive, "AgentHive") {
-  Container(api, "AgentHive Service", "Python 3.11, stdlib http.server (ThreadingHTTPServer)", "Auth + rate limiting; the approval gate, which also strips author-marked private blocks before storage and holds reserved-tag writes for human review however broad an auto-approve rule is; bounded retrieval by traversal, served either in full or as an index with bodies withheld for a follow-up fetch; the review UI (GET /ui); Prometheus metrics (GET /metrics); OpenTelemetry spans")
-  ContainerDb(db, "Memory Store", "SQLite file or PostgreSQL", "Teams, users, agents, tasks, tiered memory nodes (pending / approved / rejected), and the per-retrieval access log")
+  Container(api, "AgentHive Service", "Python 3.11, stdlib http.server (ThreadingHTTPServer)", "Auth + rate limiting; the approval gate, which also strips author-marked private blocks before storage and holds reserved-tag writes for human review however broad an auto-approve rule is; bounded retrieval by traversal, served either in full or as an index with bodies withheld for a follow-up fetch; a memory-processing layer that turns the access log, the miss log and past review decisions into proposals (missing links, tier changes, candidate auto-approve rules) without ever applying them or calling a model; the review UI (GET /ui); Prometheus metrics (GET /metrics); OpenTelemetry spans")
+  ContainerDb(db, "Memory Store", "SQLite file or PostgreSQL", "Teams, users, agents, tasks, tiered memory nodes (pending / approved / rejected), the per-retrieval access log, and the aggregated miss log - the last two being what the service reads back to reason about its own use")
   ContainerDb(cache, "Rate Limiter + Retrieval Cache", "In-memory (single replica) or Redis (shared across replicas)", "Per-token rate-limit counters; one cached traversal per anchor, serving both disclosure modes from the same entry, with cross-user reuse tracking")
 }
 
 Rel(member, coding_agent, "Runs")
 Rel(coding_agent, api, "retrieve_context, or retrieve_index then fetch_nodes / log_session", "HTTPS/JSON, X-API-Key")
 Rel(session_hook, api, "Records an unsummarised session when the agent logged nothing", "HTTPS/JSON, X-API-Key")
-Rel(admin, api, "Reviews, manages users, configures rules", "HTTPS")
+Rel(admin, api, "Reviews, manages users, configures rules, accepts or ignores proposals", "HTTPS")
 Rel(api, db, "Reads/writes", "SQL")
 Rel(api, cache, "Rate-limit checks, cache lookups and writes", "in-process, or Redis protocol")
 Rel(api, otel_backend, "Exports spans when tracing is enabled", "OTLP/HTTP")
