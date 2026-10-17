@@ -206,6 +206,9 @@ ROUTES = [
     # PROPOSAL - read-only, nothing applied. /tiers/apply is the single
     # exception and is admin-triggered, never automatic.
     (re.compile(r"^/teams/(?P<team_id>[\w-]+)/gaps$"), "GET", "gaps", "member"),
+    (re.compile(r"^/teams/(?P<team_id>[\w-]+)/aliases$"), "POST", "create_alias", "admin"),
+    (re.compile(r"^/teams/(?P<team_id>[\w-]+)/aliases$"), "GET", "list_aliases", "admin"),
+    (re.compile(r"^/teams/(?P<team_id>[\w-]+)/aliases/(?P<anchor_key>[^/]+)$"), "DELETE", "delete_alias", "admin"),
     (re.compile(r"^/teams/(?P<team_id>[\w-]+)/suggestions/links$"), "GET", "suggest_links", "admin"),
     (re.compile(r"^/teams/(?P<team_id>[\w-]+)/suggestions/tiers$"), "GET", "suggest_tiers", "admin"),
     (re.compile(r"^/teams/(?P<team_id>[\w-]+)/suggestions/rules$"), "GET", "suggest_rules", "admin"),
@@ -725,6 +728,17 @@ class Handler(BaseHTTPRequestHandler):
             )
         metrics.record_review(approved=False,
                               latency_seconds=updated.get("review_latency_seconds"))
+        # Rejecting an ALREADY-APPROVED node changes the graph exactly as
+        # much as approving one does, and for a more urgent reason:
+        # somebody has decided this must stop being served. Without this,
+        # it kept being served from cache for up to cache_ttl_seconds
+        # (300 by default) - the gate deciding something is wrong, and
+        # every agent on the team carrying on reading it anyway.
+        #
+        # Approving already invalidated. This is the other half.
+        if node["status"] == "approved" and CACHE is not None:
+            with tracing.TRACER.start_as_current_span("cache.invalidate_team"):
+                CACHE.invalidate_team(params["team_id"])
         self._send(200, updated)
         return 200
 
@@ -765,7 +779,8 @@ class Handler(BaseHTTPRequestHandler):
                 span.set_attribute("agenthive.hops", hops)
                 span.set_attribute("agenthive.hub_cutoff", hub_cutoff)
                 approved = STORE.approved_nodes(team_id)
-                result = retrieve(approved, anchor, hops=hops, hub_cutoff=hub_cutoff)
+                result = retrieve(approved, anchor, hops=hops, hub_cutoff=hub_cutoff,
+                                  aliases=STORE.alias_map(team_id))
                 span.set_attribute("agenthive.neighborhood_count", result["neighborhood_count"])
                 span.set_attribute("agenthive.approx_tokens", result["approx_tokens"])
                 span.set_attribute("agenthive.reduction_pct", result["reduction_pct"])
@@ -861,6 +876,48 @@ class Handler(BaseHTTPRequestHandler):
             "gaps": gaps,
             "awaiting_review": sum(1 for g in gaps if g["awaiting_review"]),
         })
+        return 200
+
+    def h_create_alias(self, params, query, user):
+        """Record that a phrasing means a particular note.
+
+        The natural moment for this is clearing something off the gap
+        list: somebody searched for "pg pool dying", found nothing, and a
+        reviewer knows which note answers it. One click, and every later
+        session phrasing it that way gets an exact hit instead of a
+        fallback guess or a miss.
+
+        Admin-only because it changes what retrieval returns for everyone
+        on the team."""
+        body = self._body()
+        anchor, node_id = body.get("anchor"), body.get("node_id")
+        if not anchor or not node_id:
+            raise ValueError("anchor and node_id are both required")
+        team_id = params["team_id"]
+
+        with tracing.TRACER.start_as_current_span("alias.create") as span:
+            alias = STORE.create_alias(team_id, anchor, node_id, created_by=user["name"])
+            span.set_attribute("agenthive.node_id", node_id)
+        # Resolution just changed for this team, so cached traversals keyed
+        # on the old behaviour are now wrong.
+        if CACHE is not None:
+            with tracing.TRACER.start_as_current_span("cache.invalidate_team"):
+                CACHE.invalidate_team(team_id)
+        self._send(201, alias)
+        return 201
+
+    def h_list_aliases(self, params, query, user):
+        self._send(200, {"aliases": STORE.list_aliases(params["team_id"])})
+        return 200
+
+    def h_delete_alias(self, params, query, user):
+        from urllib.parse import unquote
+
+        key = unquote(params["anchor_key"])
+        STORE.delete_alias(params["team_id"], key)
+        if CACHE is not None:
+            CACHE.invalidate_team(params["team_id"])
+        self._send(200, {"anchor_key": key, "deleted": True})
         return 200
 
     def h_suggest_links(self, params, query, user):

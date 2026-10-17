@@ -137,6 +137,31 @@ class TeamMemoryClient:
             query={"min_count": min_count}, span_name="report_gaps",
         )
 
+    def create_alias(self, anchor: str, node_id: str) -> dict:
+        """Record that a phrasing means a particular note.
+
+        The moment to use this is clearing something off report_gaps:
+        somebody searched for a phrase, found nothing, and you know which
+        note answers it. Every later session phrasing it that way then
+        gets an exact hit rather than a fallback guess or another miss.
+
+        Most of what embeddings would buy, with no model and no
+        dependency - because a human did the matching once, and the
+        answer is reusable."""
+        return self._request(
+            "POST", "/teams/" + self._team_id() + "/aliases",
+            body={"anchor": anchor, "node_id": node_id}, span_name="create_alias",
+        )
+
+    def list_aliases(self) -> dict:
+        return self._request("GET", "/teams/" + self._team_id() + "/aliases")
+
+    def delete_alias(self, anchor_key: str) -> dict:
+        from urllib.parse import quote
+
+        return self._request(
+            "DELETE", "/teams/" + self._team_id() + "/aliases/" + quote(anchor_key, safe=""))
+
     # ---- admin: proposals from the graph's own use (see insights.py) ----
 
     def suggest_links(self, min_shared: int = 3) -> dict:

@@ -270,6 +270,41 @@ worked out instead of assumed - see `observability/README.md`, which is
 explicit that if the difference trends to zero the layer is costing a
 round trip and buying nothing.
 
+## Anchor aliases
+
+Resolution is exact title, then token overlap. So "pg pool dying" finds
+nothing even when a note titled "Postgres connection pool exhaustion"
+answers it exactly — and that miss costs a round trip, then the work
+from scratch, then frequently a duplicate note under a third title.
+
+An alias fixes that phrasing permanently:
+
+```python
+admin.create_alias("pg pool dying", node_id)
+```
+
+The natural moment is clearing something off `report_gaps`: somebody
+searched for a phrase, found nothing, and a reviewer knows which note
+answers it. One action, and every later session phrasing it that way
+gets an exact hit.
+
+This is the cheap approximation of semantic search. No embeddings, no
+model, no dependency — a person did the matching once, and the answer is
+reusable by everybody afterwards. It is also self-limiting: aliases only
+get written for phrasings that actually came up and actually failed.
+
+Resolution order is **exact title → alias → token fallback**. An alias
+sits above the fallback because the fallback is a guess that happens to
+be right often enough to keep, while an alias is somebody saying what
+the phrase means — letting the guess win would make resolution worse the
+more it learned. An alias can never shadow a real title, and one
+pointing at a node since rejected degrades to the fallback rather than
+returning nothing.
+
+`agenthive_anchor_resolution_total{resolution="alias"}` counts them
+separately, so "aliases are paying off" stays distinguishable from
+"titles got better".
+
 ## Reserved tags
 
 Tags are free-form, but four names carry meaning: `decision`, `bugfix`,

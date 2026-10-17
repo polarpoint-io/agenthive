@@ -216,3 +216,25 @@ def test_node_ids_never_become_metric_labels(live_server, client_lib):
 
     with urllib.request.urlopen(live_server + "/metrics", timeout=10) as resp:
         assert node_id not in resp.read().decode()
+
+
+def test_rejecting_an_approved_node_stops_it_being_served_immediately(live_server, client_lib):
+    """Approving invalidated the retrieval cache; rejecting did not. So a
+    node a human had just pulled out of shared memory carried on being
+    served to every agent for up to cache_ttl_seconds - the gate deciding
+    something is wrong and nobody downstream finding out.
+
+    The asymmetry is the bug. A rejection is the more urgent of the two
+    directions, not the less.
+    """
+    c, _, _ = _team(client_lib, live_server)
+    c.log_session(title="Wrong answer", body="this turns out to be wrong")
+    node = c.list_pending()["pending"][0]
+    c.approve(node["id"])
+
+    # Populate the cache for this anchor.
+    assert c.retrieve_context("Wrong answer")["neighborhood_count"] == 1
+
+    c.reject(node["id"], reason="turned out to be wrong")
+
+    assert c.retrieve_context("Wrong answer")["neighborhood_count"] == 0

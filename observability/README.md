@@ -262,13 +262,15 @@ being under-used.
 
 | Metric | Meaning |
 |---|---|
-| `agenthive_anchor_resolution_total{resolution}` | `exact`, `fallback`, or `none`. |
+| `agenthive_anchor_resolution_total{resolution}` | `exact`, `alias`, `fallback`, or `none`. |
+| `agenthive_anchor_aliases` | Phrasings a human has mapped to a node (gauge). |
 | `agenthive_retrieval_neighborhood_size` | Nodes returned per retrieval. |
 
 A rising `fallback` share means titles no longer match how people phrase
 things. That is a **naming** problem, and no amount of `hops` or
-`hub_cutoff` tuning will fix it - the fix is better titles, or the
-embedding-based anchor resolution this does not yet have.
+`hub_cutoff` tuning will fix it. The fix is better titles, or an alias -
+and `resolution="alias"` rising while `fallback` falls is what recording
+them paying off looks like.
 
 ```promql
 sum(rate(agenthive_anchor_resolution_total{resolution="fallback"}[1h]))

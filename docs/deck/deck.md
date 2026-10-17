@@ -148,6 +148,24 @@ countable, closeable thing.
 
 ---
 
+# Aliases: the cheap half of semantic search
+
+Resolution is exact title, then token overlap. "pg pool dying" finds
+nothing even when a note answers it exactly.
+
+```python
+admin.create_alias("pg pool dying", node_id)
+```
+
+Recorded once, by the reviewer who was already clearing that gap. Every
+later session phrasing it that way gets an exact hit.
+
+No embeddings, no model, no dependency — a **person** did the matching,
+and the answer is reusable. Order is exact title → alias → fallback,
+because a recorded answer should always beat a guess.
+
+---
+
 # Sessions that never log
 
 `log_session` only runs when the model remembers to call it. The

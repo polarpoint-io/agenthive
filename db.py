@@ -127,6 +127,23 @@ CREATE TABLE IF NOT EXISTS auto_reject_rules (
     active INTEGER NOT NULL DEFAULT 1
 );
 
+-- A phrasing a human has mapped to a node, almost always while clearing
+-- it off the gap list. This is the cheap approximation of semantic
+-- search: no embeddings, no model, because a person did the matching
+-- once and everybody gets the answer afterwards.
+--
+-- PK on (team_id, anchor_key) so one phrasing resolves to one node and
+-- re-aliasing replaces rather than accumulating ambiguity.
+CREATE TABLE IF NOT EXISTS anchor_aliases (
+    team_id TEXT NOT NULL REFERENCES teams(id),
+    anchor_key TEXT NOT NULL,
+    anchor TEXT NOT NULL,
+    node_id TEXT NOT NULL REFERENCES memory_nodes(id),
+    created_by TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (team_id, anchor_key)
+);
+
 CREATE TABLE IF NOT EXISTS memory_access_log (
     id TEXT PRIMARY KEY,
     team_id TEXT NOT NULL REFERENCES teams(id),
@@ -890,6 +907,78 @@ class Store:
             "last_missed_at = excluded.last_missed_at",
             (team_id, key, display, user_id, now()),
         )
+
+    # ---- anchor aliases ----
+
+    def create_alias(self, team_id: str, anchor: str, node_id: str,
+                      created_by: str) -> dict:
+        """Map a phrasing to a node. Upsert, because re-aliasing is a
+        correction rather than a second opinion."""
+        from retrieval import slug
+
+        key = slug(anchor)[:200]
+        if not key:
+            raise ValueError("anchor must contain something to match on")
+
+        node = self.get_memory(node_id)
+        if not node or node["team_id"] != team_id:
+            # Same shape as every other cross-team read here: an id from
+            # elsewhere is simply not found, with no way to tell that
+            # apart from a typo.
+            raise ValueError("node not found in this team")
+        if node["status"] != "approved":
+            raise ValueError(
+                "can only alias to an approved node - a pending one is "
+                "invisible to retrieval, so the alias would resolve to nothing")
+
+        self.backend.execute(
+            "INSERT INTO anchor_aliases "
+            "(team_id, anchor_key, anchor, node_id, created_by, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT (team_id, anchor_key) DO UPDATE SET "
+            "node_id = excluded.node_id, anchor = excluded.anchor, "
+            "created_by = excluded.created_by, created_at = excluded.created_at",
+            (team_id, key, anchor.strip()[:200], node_id, created_by, now()),
+        )
+        return self.get_alias(team_id, key)
+
+    def get_alias(self, team_id: str, anchor_key: str):
+        row = self.backend.query_one(
+            "SELECT * FROM anchor_aliases WHERE team_id = ? AND anchor_key = ?",
+            (team_id, anchor_key),
+        )
+        return dict(row) if row else None
+
+    def list_aliases(self, team_id: str):
+        """Aliases with the title each one points at, so the review UI can
+        show what it means rather than an opaque id."""
+        rows = self.backend.query_all(
+            "SELECT a.*, n.title as node_title, n.status as node_status "
+            "FROM anchor_aliases a JOIN memory_nodes n ON n.id = a.node_id "
+            "WHERE a.team_id = ? ORDER BY a.created_at DESC",
+            (team_id,),
+        )
+        return [dict(r) for r in rows]
+
+    def alias_map(self, team_id: str) -> dict:
+        """{anchor_key: node_id} for the retrieval path. One small query
+        per uncached retrieval; the table has one row per phrasing a human
+        has bothered to record, so it stays small by construction."""
+        rows = self.backend.query_all(
+            "SELECT anchor_key, node_id FROM anchor_aliases WHERE team_id = ?",
+            (team_id,),
+        )
+        return {r["anchor_key"]: r["node_id"] for r in rows}
+
+    def delete_alias(self, team_id: str, anchor_key: str) -> None:
+        self.backend.execute(
+            "DELETE FROM anchor_aliases WHERE team_id = ? AND anchor_key = ?",
+            (team_id, anchor_key),
+        )
+
+    def global_alias_count(self) -> int:
+        row = self.backend.query_one("SELECT COUNT(*) as n FROM anchor_aliases")
+        return row["n"] if row else 0
 
     def close_retrieval_miss(self, team_id: str, anchor: str) -> int:
         """A previously-missing anchor just returned something. Clear the
