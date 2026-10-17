@@ -1,3 +1,10 @@
+# [1.10.0](https://github.com/polarpoint-io/agenthive/compare/v1.9.0...v1.10.0) (2026-10-17)
+
+
+### Features
+
+* **retrieval:** add progressive-disclosure index and fetch layers ([0a3a5e3](https://github.com/polarpoint-io/agenthive/commit/0a3a5e3756654009e96833fc854786579cd64f7f))
+
 # [1.9.0](https://github.com/polarpoint-io/agenthive/compare/v1.8.0...v1.9.0) (2026-10-08)
 
 
