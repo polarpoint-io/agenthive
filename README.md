@@ -357,6 +357,41 @@ times the headline figure.
 [`observability/README.md`](observability/README.md) has the pricing
 expression and the reasons not to quote a currency figure from it.
 
+## Environment facts
+
+The memory that actually saves tokens is not a recalled decision — it is
+a fact that replaces **exploration**. An agent that would otherwise read
+fifteen files to work out that tests run with `python -m pytest -q` here
+can be told in fifty tokens.
+
+```python
+client.log_session(title="How to run the tests",
+                   body="tests: python -m pytest -q",
+                   tags=["env-fact"])
+```
+
+An `env-fact` is served by `GET /teams/{id}/facts` and injected into
+every session for the team, with no anchor and no tool call. That is
+what makes it worth its tokens, and what makes a wrong one expensive —
+so facts are capped at 200 characters, ordered by corroboration, and
+**anything contradicted is excluded entirely**. An unconditionally
+injected falsehood is the worst thing this system can do.
+
+Longer material is still welcome; log it without the tag and it stays
+reachable by anchor like any other note.
+
+## Tool usage, pooled across the team
+
+Every tool an agent loads is sent to the model on every request, so one
+nobody uses is a standing tax. `POST /teams/{id}/tool-usage` collects
+what each session loaded and used; `GET /teams/{id}/tool-pruning`
+proposes a deny list once **several people** agree a tool is unused.
+
+Pooling is the point. Kept per machine, every engineer spends their own
+five sessions re-deriving the same list and a new joiner starts from
+nothing. The team has the evidence already; it just had nowhere to put
+it.
+
 ## Corroboration: was it still true?
 
 Tiers measure whether a note is **read**. That is popularity, not truth

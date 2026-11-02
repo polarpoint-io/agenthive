@@ -37,7 +37,19 @@ it reaches storage or the review queue:
 
 import re
 
-RESERVED_TAGS = frozenset({"decision", "bugfix", "security_alert", "sensitive"})
+RESERVED_TAGS = frozenset({"decision", "bugfix", "security_alert", "sensitive",
+                           "env-fact"})
+
+# An environment fact is injected into EVERY session for this team,
+# unconditionally, without an anchor and without the agent asking. That
+# is what makes it worth tokens - it substitutes for exploration the
+# agent would otherwise pay for - and also what makes it dangerous, so
+# it is held to a length no ordinary note is.
+#
+# "tests: python -m pytest -q" is a fact. Three paragraphs about why the
+# test runner was changed is a note, and belongs in the graph the normal
+# way, reachable by anchor.
+MAX_FACT_CHARS = 200
 
 NEVER_AUTO_APPROVE = frozenset({"security_alert", "sensitive"})
 
@@ -99,3 +111,11 @@ def normalise_for_duplicate(title: str, body: str) -> str:
     better body is an improvement, and discarding it as a duplicate
     would lose the improvement and leave the weaker note in place."""
     return (title or "").strip().lower() + "\x00" + " ".join((body or "").split()).lower()
+
+
+def is_fact(tags) -> bool:
+    return "env-fact" in {str(t).strip().lower() for t in (tags or [])}
+
+
+def fact_too_long(body: str) -> bool:
+    return len((body or "").strip()) > MAX_FACT_CHARS

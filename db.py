@@ -205,6 +205,21 @@ CREATE TABLE IF NOT EXISTS agent_sessions (
 CREATE INDEX IF NOT EXISTS idx_sessions_team_outcome
     ON agent_sessions(team_id, outcome);
 
+-- Which tools a team's sessions actually load and use.
+--
+-- Pooled across the team rather than kept per machine: five engineers'
+-- evidence beats one engineer's, and a new joiner inherits the answer
+-- instead of spending five sessions re-deriving it.
+CREATE TABLE IF NOT EXISTS tool_usage (
+    team_id TEXT NOT NULL REFERENCES teams(id),
+    tool TEXT NOT NULL,
+    user_id TEXT NOT NULL REFERENCES users(id),
+    uses INTEGER NOT NULL DEFAULT 0,
+    sessions INTEGER NOT NULL DEFAULT 0,
+    last_seen_at TEXT NOT NULL,
+    PRIMARY KEY (team_id, tool, user_id)
+);
+
 CREATE TABLE IF NOT EXISTS memory_access_log (
     id TEXT PRIMARY KEY,
     team_id TEXT NOT NULL REFERENCES teams(id),
@@ -1088,6 +1103,59 @@ class Store:
     def global_alias_count(self) -> int:
         row = self.backend.query_one("SELECT COUNT(*) as n FROM anchor_aliases")
         return row["n"] if row else 0
+
+    def list_env_facts(self, team_id: str, limit: int = 25):
+        """Short, approved facts about how this repository works.
+
+        Injected into every session for this team without an anchor, so
+        the ordering is by corroboration first: a fact three people have
+        confirmed earns its place ahead of one nobody has touched.
+        Contradicted facts are excluded entirely - an unconditionally
+        injected falsehood is the worst thing this system can do."""
+        rows = self.backend.query_all(
+            "SELECT n.id, n.title, n.body, "
+            "       (SELECT COUNT(*) FROM memory_feedback f "
+            "         WHERE f.node_id = n.id AND f.verdict = 'confirmed') as confirmations "
+            "FROM memory_nodes n "
+            "WHERE n.team_id = ? AND n.status = 'approved' "
+            "  AND n.tags LIKE '%env-fact%' "
+            "  AND NOT EXISTS (SELECT 1 FROM memory_feedback f "
+            "                   WHERE f.node_id = n.id AND f.verdict = 'contradicted') "
+            "ORDER BY confirmations DESC, n.created_at ASC LIMIT ?",
+            (team_id, limit),
+        )
+        return [dict(r) for r in rows]
+
+    # ---- tool usage, pooled across the team ----
+
+    def record_tool_usage(self, team_id: str, user_id: str, tool: str,
+                           used: bool, session_id: str = "") -> None:
+        """One row per (team, tool, user). Pooled on purpose.
+
+        Keeping this per-machine - the obvious design - means every
+        engineer spends their own five sessions re-deriving the same
+        deny list, and a new joiner starts from nothing. A team has the
+        evidence already; it just had nowhere to put it."""
+        self.backend.execute(
+            "INSERT INTO tool_usage "
+            "(team_id, tool, user_id, uses, last_seen_at, sessions) "
+            "VALUES (?, ?, ?, ?, ?, 1) "
+            "ON CONFLICT (team_id, tool, user_id) DO UPDATE SET "
+            "uses = tool_usage.uses + excluded.uses, "
+            "sessions = tool_usage.sessions + 1, "
+            "last_seen_at = excluded.last_seen_at",
+            (team_id, tool, user_id, 1 if used else 0, now()),
+        )
+
+    def tool_usage(self, team_id: str):
+        rows = self.backend.query_all(
+            "SELECT tool, SUM(uses) as uses, SUM(sessions) as sessions, "
+            "       COUNT(DISTINCT user_id) as users, MAX(last_seen_at) as last_seen_at "
+            "FROM tool_usage WHERE team_id = ? GROUP BY tool "
+            "ORDER BY uses ASC, sessions DESC",
+            (team_id,),
+        )
+        return [dict(r) for r in rows]
 
     # ---- sessions: the unit the evidence is computed over ----
 

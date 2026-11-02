@@ -505,3 +505,34 @@ def compare_sessions(sessions, min_per_arm: int = MIN_SESSIONS_PER_ARM,
     return {"arms": arms, "verdict": verdict, "note": note,
             "min_sessions_per_arm": min_per_arm,
             "holdout_running": holdout_running}
+
+
+# Tool pruning thresholds. A tool is only dropped on evidence from more
+# than one person: one engineer who never uses the browser tool is a
+# preference, a whole team that never uses it is a fact.
+PRUNE_MIN_SESSIONS = 5
+PRUNE_MIN_USERS = 2
+
+
+def propose_tool_pruning(usage, min_sessions: int = PRUNE_MIN_SESSIONS,
+                          min_users: int = PRUNE_MIN_USERS) -> dict:
+    """Tools this team loads and never uses.
+
+    Every loaded tool's definition is sent with every request, so an
+    unused one is a standing tax on every turn. Dropping it is safe
+    precisely because it is reversible - and because being wrong costs
+    one command to undo, not a lost answer."""
+    prune, keep, thin = [], [], []
+    for row in usage:
+        entry = {"tool": row["tool"], "uses": row["uses"],
+                 "sessions": row["sessions"], "users": row["users"]}
+        if row["uses"] > 0:
+            keep.append(entry)
+        elif row["sessions"] >= min_sessions and row["users"] >= min_users:
+            prune.append(entry)
+        else:
+            entry["needs"] = (f"{min_sessions} sessions across {min_users} "
+                              "people before this is evidence")
+            thin.append(entry)
+    return {"prune": prune, "keep": keep, "not_yet": thin,
+            "min_sessions": min_sessions, "min_users": min_users}

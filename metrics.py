@@ -249,6 +249,17 @@ WORK_SURVIVAL = Counter(
     "nobody has to remember to send it.",
     ["survived"], registry=REGISTRY,
 )
+FACTS_SERVED = Counter(
+    "agenthive_facts_served_total", "Session-start fact injections",
+    registry=REGISTRY,
+)
+FACT_TOKENS = Counter(
+    "agenthive_fact_tokens_total",
+    "Tokens injected as environment facts. The one path where memory "
+    "reaches an agent unasked - and the one most likely to substitute "
+    "for exploration, which is where the real token saving lives.",
+    registry=REGISTRY,
+)
 AUTO_INDEX = Counter(
     "agenthive_auto_index_total",
     "Retrievals the SERVER switched to index mode because the full "
@@ -541,3 +552,9 @@ def record_holdout():
 
 def record_auto_index():
     AUTO_INDEX.inc()
+
+
+def record_facts_served(count: int, tokens: int):
+    FACTS_SERVED.inc()
+    FACT_TOKENS.inc(max(tokens, 0))
+    TOKENS_INJECTED.inc(max(tokens, 0))

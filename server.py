@@ -208,6 +208,9 @@ ROUTES = [
     # exception and is admin-triggered, never automatic.
     (re.compile(r"^/teams/(?P<team_id>[\w-]+)/memory/(?P<node_id>[\w-]+)/feedback$"), "POST", "feedback", "member"),
     (re.compile(r"^/teams/(?P<team_id>[\w-]+)/disputed$"), "GET", "disputed", "admin"),
+    (re.compile(r"^/teams/(?P<team_id>[\w-]+)/facts$"), "GET", "facts", "member"),
+    (re.compile(r"^/teams/(?P<team_id>[\w-]+)/tool-usage$"), "POST", "tool_usage", "member"),
+    (re.compile(r"^/teams/(?P<team_id>[\w-]+)/tool-pruning$"), "GET", "tool_pruning", "member"),
     (re.compile(r"^/teams/(?P<team_id>[\w-]+)/evidence$"), "GET", "evidence", "member"),
     (re.compile(r"^/teams/(?P<team_id>[\w-]+)/sessions/unverified$"), "GET", "unverified", "member"),
     (re.compile(r"^/teams/(?P<team_id>[\w-]+)/sessions/(?P<session_id>[\w.-]+)/verify$"), "POST", "verify_session", "member"),
@@ -636,6 +639,12 @@ class Handler(BaseHTTPRequestHandler):
         # the author already marked as not-for-sharing. Title is stripped
         # too - it is the one field the review queue renders in full.
         session_id = body.get("session_id") or ""
+        if governance.is_fact(body.get("tags")) and governance.fact_too_long(body["body"]):
+            raise ValueError(
+                f"an env-fact is injected into every session unconditionally, so "
+                f"it is capped at {governance.MAX_FACT_CHARS} characters. This is "
+                f"{len(body['body'].strip())}. Log it as an ordinary note instead - "
+                "it will still be reachable by anchor.")
         clean_title, t_stripped = governance.strip_private(body["title"])
         clean_body, b_stripped = governance.strip_private(body["body"])
         stripped = t_stripped + b_stripped
@@ -984,6 +993,46 @@ class Handler(BaseHTTPRequestHandler):
         disputed = STORE.list_disputed(params["team_id"])
         metrics.record_proposals("disputed", len(disputed))
         self._send(200, {"disputed": disputed})
+        return 200
+
+    def h_facts(self, params, query, user):
+        """Short facts about how this repository works, for injection at
+        session start.
+
+        This is the one path where memory reaches an agent without being
+        asked for, which is both why it saves tokens - it substitutes
+        for exploration the agent would otherwise pay for - and why it
+        is capped hard and excludes anything contradicted."""
+        facts = STORE.list_env_facts(params["team_id"])
+        total = sum(len(f["body"]) for f in facts)
+        metrics.record_facts_served(len(facts), total // 4)
+        self._send(200, {"facts": facts, "approx_tokens": total // 4})
+        return 200
+
+    def h_tool_usage(self, params, query, user):
+        """What this session loaded and what it actually used.
+
+        Pooled across the team rather than kept per machine: five
+        engineers' evidence beats one engineer's, and a new joiner
+        inherits the answer."""
+        body = self._body()
+        loaded = body.get("loaded") or []
+        used = {str(t) for t in (body.get("used") or [])}
+        if not isinstance(loaded, list):
+            raise ValueError("loaded must be a list of tool names")
+        if len(loaded) > 200:
+            raise ValueError("at most 200 tools per report")
+        for tool in loaded:
+            STORE.record_tool_usage(params["team_id"], user["id"], str(tool),
+                                     used=str(tool) in used,
+                                     session_id=body.get("session_id", ""))
+        self._send(200, {"recorded": len(loaded), "used": len(used)})
+        return 200
+
+    def h_tool_pruning(self, params, query, user):
+        proposal = insights.propose_tool_pruning(STORE.tool_usage(params["team_id"]))
+        metrics.record_proposals("tool_prune", len(proposal["prune"]))
+        self._send(200, proposal)
         return 200
 
     def h_evidence(self, params, query, user):
