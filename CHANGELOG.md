@@ -1,3 +1,16 @@
+# [1.12.0](https://github.com/polarpoint-io/agenthive/compare/v1.11.0...v1.12.0) (2026-11-02)
+
+
+### Bug Fixes
+
+* **tokens:** make disclosure happen by default, and measure the real cost ([2a130f0](https://github.com/polarpoint-io/agenthive/commit/2a130f062be810b5a72cd61e65995ba292dbdcfb))
+
+
+### Features
+
+* evidence that memory helps, and corroboration that it is still true ([87c6f59](https://github.com/polarpoint-io/agenthive/commit/87c6f5942c68c70cd017a348e2b118c45f845104))
+* **facts:** environment facts, and tool-usage evidence pooled per team ([2e68089](https://github.com/polarpoint-io/agenthive/commit/2e680891257757df588f2d58e6eea7af611ad800))
+
 # [1.11.0](https://github.com/polarpoint-io/agenthive/compare/v1.10.0...v1.11.0) (2026-10-17)
 
 
