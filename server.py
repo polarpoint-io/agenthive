@@ -778,9 +778,12 @@ class Handler(BaseHTTPRequestHandler):
         # review UI, client.py, anyone's .cursor/rules - returning exactly
         # the bytes they returned before this route learned a second mode.
         session_id = (query.get("session_id") or [""])[0]
-        mode = ((query.get("mode") or ["full"])[0] or "full").lower()
-        if mode not in ("full", "index"):
+        # No mode given means "you decide" - see the adaptive branch
+        # after the traversal. An explicit mode is always honoured.
+        requested = ((query.get("mode") or [""])[0] or "").lower()
+        if requested and requested not in ("full", "index"):
             raise ValueError("mode must be 'full' or 'index'")
+        mode = requested or "full"
         tag_filter = [t for t in (query.get("tags") or [None])[0].split(",")] \
             if (query.get("tags") or [None])[0] else []
 
@@ -870,9 +873,37 @@ class Handler(BaseHTTPRequestHandler):
             with tracing.TRACER.start_as_current_span("access_log.record_miss") as span:
                 span.set_attribute("agenthive.anchor", anchor)
                 STORE.record_retrieval_miss(team_id, anchor, user["id"])
+                # A miss costs a round trip either way. Spend it on
+                # something: tell the caller this is now a recorded gap,
+                # so the session that just failed to find anything knows
+                # its log_session is the fix.
+                result["gap_recorded"] = True
+                result["note"] = (
+                    "Nothing matched. This anchor is now on the team's gap "
+                    "list - if you work it out, log_session closes it for "
+                    "everyone.")
+
+        # Adaptive: when the caller expressed no preference and the full
+        # neighbourhood is expensive, send the index. This is the whole
+        # reason progressive disclosure now saves anything - agents
+        # followed the documented default and never chose it themselves.
+        auto = False
+        if not requested and CONFIG.auto_index_over_tokens > 0:
+            if (result.get("approx_tokens") or 0) > CONFIG.auto_index_over_tokens:
+                mode, auto = "index", True
 
         payload = project_index(result) if mode == "index" else result
+        if auto:
+            payload["auto_index"] = True
+            payload["note"] = (
+                f"This neighbourhood is {result['approx_tokens']} tokens, over "
+                f"the {CONFIG.auto_index_over_tokens}-token threshold, so you "
+                "have titles and per-node costs instead of bodies. Call "
+                "fetch_nodes with the ids worth reading. Pass mode=full to "
+                "override.")
         metrics.record_retrieval(payload, cache_status, cross_user, mode=mode)
+        if auto:
+            metrics.record_auto_index()
         STORE.touch_session(team_id, session_id, user["id"],
                             nodes=payload.get("neighborhood_count", 0),
                             tokens=payload.get("approx_tokens", 0))

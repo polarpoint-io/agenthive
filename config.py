@@ -88,6 +88,20 @@ class Config:
     # halfway through would measure nothing at all.
     holdout_percent: int = _int("AGENTHIVE_HOLDOUT_PERCENT", 0)
 
+    # --- adaptive disclosure --------------------------------------------
+    # Progressive disclosure was opt-in, and opt-in did not work. An agent
+    # cannot know a neighbourhood is wide BEFORE retrieving it, so it
+    # takes the documented default every time and the mechanism that
+    # saves tokens never runs.
+    #
+    # The server already knows the size - it just computed it. Over this
+    # many tokens, a retrieval that did not ask for a specific mode gets
+    # the index instead, and is told so. Under it, the full result: two
+    # round trips to save a few hundred tokens is a worse deal than one.
+    #
+    # Set to 0 to go back to always returning full results.
+    auto_index_over_tokens: int = _int("AGENTHIVE_AUTO_INDEX_OVER", 800)
+
     # 0 (default) means tokens never expire on their own - the original
     # behavior, and still correct for a small team that rotates tokens by
     # hand. Set to expire new/rotated tokens automatically after this many

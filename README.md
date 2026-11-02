@@ -226,6 +226,18 @@ repo's README for setup.
 
 ## Progressive disclosure
 
+Large results come back as an **index** automatically — titles, tags and
+a per-node token cost instead of bodies — and say so. Under
+`AGENTHIVE_AUTO_INDEX_OVER` (800 tokens) you get the whole thing, since
+two round trips to save a few hundred tokens is a worse deal than one.
+
+This used to be opt-in, and opt-in did not work: an agent cannot know a
+neighbourhood is wide *before* retrieving it, so it took the documented
+default every time and the mechanism never ran. The server already knows
+the size. An explicit `mode=full` still overrides.
+
+
+
 `retrieve_context` answers "what is near this anchor, and here is all of
 it" in one round trip. That is the right default, and it stays the
 default. But it bills the caller for every body in the neighborhood,
@@ -317,6 +329,24 @@ silently empty result is indistinguishable from an empty graph.
 
 It is off by default. It buys evidence by making some sessions worse,
 and only the team living with that can agree to it.
+
+### Is it actually saving you anything?
+
+```sh
+python3 scripts/diagnose_tokens.py http://your-agenthive
+```
+
+Reads `/metrics` and says where the tokens went, including when the
+answer is "this is costing you more than it saves". It will tell you
+that outright.
+
+The headline metric cannot answer this and never could.
+`tokens_avoided_total` is measured against dumping the entire team
+graph — a baseline nobody would ever run — so it looks excellent whether
+or not your spend moved. `tokens_injected_total` is the side of the
+ledger that is real: against the honest baseline of **not running
+AgentHive at all**, memory adds input tokens and has to earn them back
+in work avoided.
 
 ### The token numbers are tokens, not money
 

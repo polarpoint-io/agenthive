@@ -249,6 +249,22 @@ WORK_SURVIVAL = Counter(
     "nobody has to remember to send it.",
     ["survived"], registry=REGISTRY,
 )
+AUTO_INDEX = Counter(
+    "agenthive_auto_index_total",
+    "Retrievals the SERVER switched to index mode because the full "
+    "neighbourhood was expensive. Opt-in index mode was never chosen by "
+    "agents; this is the number that shows disclosure actually running.",
+    registry=REGISTRY,
+)
+TOKENS_INJECTED = Counter(
+    "agenthive_tokens_injected_total",
+    "Tokens AgentHive put INTO an agent's context. The honest cost side: "
+    "against the real baseline of not running AgentHive at all, memory "
+    "adds tokens and has to earn them back in work avoided. Read this "
+    "next to tokens_avoided_total, which is measured against dumping the "
+    "whole graph - a baseline nobody would ever run.",
+    registry=REGISTRY,
+)
 HOLDOUT = Counter(
     "agenthive_holdout_retrievals_total",
     "Retrievals deliberately served nothing to measure what memory is worth. "
@@ -416,6 +432,7 @@ def record_retrieval(result: dict, cache_status: str, cross_user: bool, mode: st
     NEIGHBORHOOD_SIZE.observe(result.get("neighborhood_count") or 0)
     served = result.get("approx_tokens", 0) or 0
     TOKENS_SERVED.inc(served)
+    TOKENS_INJECTED.inc(served)
 
     # In index mode `served` is titles only, so the full-neighborhood cost
     # has to come from the field project_index() preserved for exactly this.
@@ -520,3 +537,7 @@ def record_work_survival(survived: bool):
 
 def record_holdout():
     HOLDOUT.inc()
+
+
+def record_auto_index():
+    AUTO_INDEX.inc()
