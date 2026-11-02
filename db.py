@@ -144,6 +144,67 @@ CREATE TABLE IF NOT EXISTS anchor_aliases (
     PRIMARY KEY (team_id, anchor_key)
 );
 
+-- What later sessions said about a node that already exists.
+--
+-- Tiers measure whether a note is READ. They say nothing about whether
+-- it is still TRUE, so a wrong note people keep pulling up looks
+-- healthy and gets promoted. This is the missing half: corroboration.
+--
+-- One verdict per (node, user), not per call. A single agent confirming
+-- the same note fifty times across one afternoon is one person's
+-- opinion fifty times; three different teammates is evidence. Same
+-- reasoning as the tier rules counting distinct users rather than
+-- repeat hits. An upsert, so changing your mind replaces rather than
+-- accumulates both.
+CREATE TABLE IF NOT EXISTS memory_feedback (
+    node_id TEXT NOT NULL REFERENCES memory_nodes(id),
+    user_id TEXT NOT NULL REFERENCES users(id),
+    team_id TEXT NOT NULL REFERENCES teams(id),
+    verdict TEXT NOT NULL,              -- confirmed | contradicted
+    reason TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (node_id, user_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_feedback_team_verdict
+    ON memory_feedback(team_id, verdict);
+
+-- One row per agent session, so "did memory help?" becomes a question
+-- the data can answer.
+--
+-- AgentHive had no concept of a session at all. Retrievals and writes
+-- were independent events with no thread between them, which meant the
+-- one comparison that matters - sessions that got memory against
+-- sessions that did not - could not be computed from anything stored.
+--
+-- session_id comes from the caller and is opaque here. agenthive-mcp is
+-- spawned once per session over stdio, so a value generated at import
+-- is a session identifier without anyone having to invent one.
+CREATE TABLE IF NOT EXISTS agent_sessions (
+    session_id TEXT NOT NULL,
+    team_id TEXT NOT NULL REFERENCES teams(id),
+    user_id TEXT NOT NULL REFERENCES users(id),
+    started_at TEXT NOT NULL,
+    -- the retrieval side
+    retrievals INTEGER NOT NULL DEFAULT 0,
+    nodes_served INTEGER NOT NULL DEFAULT 0,
+    tokens_served INTEGER NOT NULL DEFAULT 0,
+    held_out INTEGER NOT NULL DEFAULT 0,
+    -- the outcome side, all nullable: a session that never reports one
+    -- is not a failure, it is an unknown, and the evidence endpoint
+    -- counts it as such rather than quietly as a success
+    outcome TEXT,
+    turns INTEGER,
+    logged_at TEXT,
+    commit_sha TEXT,
+    work_survived INTEGER,
+    verified_at TEXT,
+    PRIMARY KEY (team_id, session_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_sessions_team_outcome
+    ON agent_sessions(team_id, outcome);
+
 CREATE TABLE IF NOT EXISTS memory_access_log (
     id TEXT PRIMARY KEY,
     team_id TEXT NOT NULL REFERENCES teams(id),
@@ -211,6 +272,11 @@ def now() -> str:
 # An alias key is stored and looked up verbatim, so it cannot be
 # truncated. Bounded instead, with a refusal rather than a silent cut.
 MAX_ANCHOR_KEY = 500
+
+# What a session may say about itself. "unknown" is explicit rather than
+# implied by absence, so a caller can distinguish "did not finish" from
+# "did not say".
+SESSION_OUTCOMES = frozenset({"succeeded", "partial", "failed", "unknown"})
 
 
 def _age_seconds(stamp: str) -> float:
@@ -1023,6 +1089,182 @@ class Store:
         row = self.backend.query_one("SELECT COUNT(*) as n FROM anchor_aliases")
         return row["n"] if row else 0
 
+    # ---- sessions: the unit the evidence is computed over ----
+
+    def touch_session(self, team_id: str, session_id: str, user_id: str,
+                       nodes: int = 0, tokens: int = 0, held_out: bool = False) -> None:
+        """Record that a session asked for memory. Upsert: a session
+        retrieving ten times is one session, with ten retrievals."""
+        if not session_id:
+            return
+        self.backend.execute(
+            "INSERT INTO agent_sessions "
+            "(session_id, team_id, user_id, started_at, retrievals, nodes_served, "
+            " tokens_served, held_out) "
+            "VALUES (?, ?, ?, ?, 1, ?, ?, ?) "
+            "ON CONFLICT (team_id, session_id) DO UPDATE SET "
+            "retrievals = agent_sessions.retrievals + 1, "
+            "nodes_served = agent_sessions.nodes_served + excluded.nodes_served, "
+            "tokens_served = agent_sessions.tokens_served + excluded.tokens_served, "
+            "held_out = CASE WHEN excluded.held_out = 1 THEN 1 "
+            "               ELSE agent_sessions.held_out END",
+            (session_id, team_id, user_id, now(), nodes, tokens, 1 if held_out else 0),
+        )
+
+    def record_session_outcome(self, team_id: str, session_id: str, user_id: str,
+                                outcome: str = None, turns: int = None,
+                                commit_sha: str = None) -> dict:
+        """What the session reported about itself at the end.
+
+        Creates the row if the session never retrieved - that case is the
+        whole point of the comparison, so it must be counted, not
+        skipped."""
+        if outcome is not None and outcome not in SESSION_OUTCOMES:
+            raise ValueError(
+                f"outcome must be one of {sorted(SESSION_OUTCOMES)}")
+        if not session_id:
+            return {}
+
+        self.backend.execute(
+            "INSERT INTO agent_sessions "
+            "(session_id, team_id, user_id, started_at, outcome, turns, "
+            " commit_sha, logged_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT (team_id, session_id) DO UPDATE SET "
+            "outcome = COALESCE(excluded.outcome, agent_sessions.outcome), "
+            "turns = COALESCE(excluded.turns, agent_sessions.turns), "
+            "commit_sha = COALESCE(excluded.commit_sha, agent_sessions.commit_sha), "
+            "logged_at = excluded.logged_at",
+            (session_id, team_id, user_id, now(), outcome, turns, commit_sha, now()),
+        )
+        return self.get_session(team_id, session_id)
+
+    def get_session(self, team_id: str, session_id: str):
+        row = self.backend.query_one(
+            "SELECT * FROM agent_sessions WHERE team_id = ? AND session_id = ?",
+            (team_id, session_id),
+        )
+        return dict(row) if row else None
+
+    def list_sessions(self, team_id: str, limit: int = 1000):
+        rows = self.backend.query_all(
+            "SELECT * FROM agent_sessions WHERE team_id = ? "
+            "ORDER BY started_at DESC LIMIT ?",
+            (team_id, limit),
+        )
+        return [dict(r) for r in rows]
+
+    def sessions_awaiting_verification(self, team_id: str, limit: int = 50):
+        """Sessions that recorded a commit and have not been checked for
+        survival yet - what the hook asks for at session start."""
+        rows = self.backend.query_all(
+            "SELECT session_id, commit_sha FROM agent_sessions "
+            "WHERE team_id = ? AND commit_sha IS NOT NULL AND commit_sha != '' "
+            "  AND work_survived IS NULL "
+            "ORDER BY logged_at DESC LIMIT ?",
+            (team_id, limit),
+        )
+        return [dict(r) for r in rows]
+
+    def record_work_survival(self, team_id: str, session_id: str, survived: bool) -> None:
+        self.backend.execute(
+            "UPDATE agent_sessions SET work_survived = ?, verified_at = ? "
+            "WHERE team_id = ? AND session_id = ?",
+            (1 if survived else 0, now(), team_id, session_id),
+        )
+
+    # ---- corroboration: what later sessions said about a node ----
+
+    def record_feedback(self, team_id: str, node_id: str, user_id: str,
+                         verdict: str, reason: str = "") -> dict:
+        """One session's verdict on an existing node.
+
+        Only approved nodes can be judged: a pending one is invisible to
+        retrieval, so nobody can have used it, and a verdict on it would
+        be an opinion rather than experience.
+
+        A contradiction does NOT remove anything. It raises a flag a
+        human resolves. Letting a report pull a node out of retrieval
+        would hand every caller a way to blank the graph one verdict at
+        a time, which is precisely the attack the approval gate exists
+        to prevent - and the gate would have been bypassed in the
+        direction nobody watches."""
+        if verdict not in ("confirmed", "contradicted"):
+            raise ValueError("verdict must be 'confirmed' or 'contradicted'")
+
+        node = self.get_memory(node_id)
+        if not node or node["team_id"] != team_id:
+            raise ValueError("node not found in this team")
+        if node["status"] != "approved":
+            raise ValueError(
+                "only an approved node can be confirmed or contradicted - a "
+                "pending one was never visible, so nobody has used it")
+
+        self.backend.execute(
+            "INSERT INTO memory_feedback "
+            "(node_id, user_id, team_id, verdict, reason, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT (node_id, user_id) DO UPDATE SET "
+            "verdict = excluded.verdict, reason = excluded.reason, "
+            "created_at = excluded.created_at",
+            (node_id, user_id, team_id, verdict, reason or "", now()),
+        )
+        return self.feedback_for(node_id)
+
+    def feedback_for(self, node_id: str) -> dict:
+        rows = self.backend.query_all(
+            "SELECT verdict, COUNT(*) as n FROM memory_feedback "
+            "WHERE node_id = ? GROUP BY verdict",
+            (node_id,),
+        )
+        counts = {r["verdict"]: r["n"] for r in rows}
+        return {
+            "node_id": node_id,
+            "confirmations": counts.get("confirmed", 0),
+            "contradictions": counts.get("contradicted", 0),
+        }
+
+    def feedback_counts(self, team_id: str) -> dict:
+        """{node_id: {confirmations, contradictions}} for a whole team,
+        in one query - the retrieval path needs it per node and must not
+        issue a query each."""
+        rows = self.backend.query_all(
+            "SELECT node_id, verdict, COUNT(*) as n FROM memory_feedback "
+            "WHERE team_id = ? GROUP BY node_id, verdict",
+            (team_id,),
+        )
+        out = {}
+        for row in rows:
+            entry = out.setdefault(row["node_id"], {"confirmations": 0, "contradictions": 0})
+            key = "confirmations" if row["verdict"] == "confirmed" else "contradictions"
+            entry[key] = row["n"]
+        return out
+
+    def list_disputed(self, team_id: str, limit: int = 100):
+        """Approved nodes a later session has contradicted, with who said
+        so and why. The review queue for things already in the graph -
+        the gate currently only looks at what is trying to get IN."""
+        rows = self.backend.query_all(
+            "SELECT f.node_id, f.reason, f.created_at, u.name as reported_by, "
+            "       n.title, n.tier "
+            "FROM memory_feedback f "
+            "JOIN memory_nodes n ON n.id = f.node_id "
+            "JOIN users u ON u.id = f.user_id "
+            "WHERE f.team_id = ? AND f.verdict = 'contradicted' "
+            "  AND n.status = 'approved' "
+            "ORDER BY f.created_at DESC LIMIT ?",
+            (team_id, limit),
+        )
+        return [dict(r) for r in rows]
+
+    def global_disputed_count(self) -> int:
+        row = self.backend.query_one(
+            "SELECT COUNT(DISTINCT f.node_id) as n FROM memory_feedback f "
+            "JOIN memory_nodes n ON n.id = f.node_id "
+            "WHERE f.verdict = 'contradicted' AND n.status = 'approved'"
+        )
+        return row["n"] if row else 0
+
     def close_retrieval_miss(self, team_id: str, anchor: str) -> int:
         """A previously-missing anchor just returned something. Clear the
         gap and report how many misses it had accumulated.
@@ -1104,7 +1346,11 @@ class Store:
             "SELECT n.id, n.title, n.tier, n.created_at, "
             "       COUNT(DISTINCT a.retrieval_id) as access_count, "
             "       COUNT(DISTINCT a.user_id) as distinct_users, "
-            "       MAX(a.accessed_at) as last_accessed_at "
+            "       MAX(a.accessed_at) as last_accessed_at, "
+            "       (SELECT COUNT(*) FROM memory_feedback f "
+            "         WHERE f.node_id = n.id AND f.verdict = 'confirmed') as confirmations, "
+            "       (SELECT COUNT(*) FROM memory_feedback f "
+            "         WHERE f.node_id = n.id AND f.verdict = 'contradicted') as contradictions "
             "FROM memory_nodes n "
             "LEFT JOIN memory_access_log a ON a.node_id = n.id "
             "WHERE n.team_id = ? AND n.status = 'approved' "

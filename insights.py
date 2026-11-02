@@ -62,6 +62,19 @@ TIER_RULES = (
 )
 DEFAULT_TIER = "L1"
 
+# One contradiction stops a node being promoted any further.
+#
+# Tiers measure whether a note is READ, which is popularity, not truth.
+# Without this a note that is WRONG but useful-looking keeps being
+# retrieved, keeps climbing, and ends up ranked canonical - the system
+# confidently amplifying the one thing it should have caught. A single
+# teammate saying "I tried this and it was wrong" is enough to stop the
+# climb; it takes more to push it back down, because one dissenting
+# voice should not be able to demote a note the rest of the team relies
+# on.
+CONTRADICTIONS_BLOCK_PROMOTION = 1
+CONTRADICTIONS_FORCE_DEMOTION = 2
+
 
 def rank_gaps(miss_rows, pending_nodes, min_count: int = 2) -> list:
     """What this team keeps looking for and never finds.
@@ -157,6 +170,8 @@ def propose_tiers(stats, default_tier: str = DEFAULT_TIER) -> list:
     for row in stats:
         users = row["distinct_users"] or 0
         hits = row["access_count"] or 0
+        against = row.get("contradictions") or 0
+        current = row["tier"] or default_tier
 
         target = default_tier
         for tier, min_users, min_hits in TIER_RULES:
@@ -164,7 +179,16 @@ def propose_tiers(stats, default_tier: str = DEFAULT_TIER) -> list:
                 target = tier
                 break
 
-        current = row["tier"] or default_tier
+        # Correctness outranks popularity. Earning a tier on retrieval
+        # counts for nothing once somebody has said the note is wrong.
+        reason = "use"
+        if against >= CONTRADICTIONS_FORCE_DEMOTION:
+            target = default_tier
+            reason = "contradicted"
+        elif against >= CONTRADICTIONS_BLOCK_PROMOTION and target > current:
+            target = current          # hold it where it is, do not climb
+            reason = "contradicted"
+
         if target == current:
             continue
         out.append({
@@ -173,8 +197,11 @@ def propose_tiers(stats, default_tier: str = DEFAULT_TIER) -> list:
             "current_tier": current,
             "proposed_tier": target,
             "direction": "promote" if target > current else "demote",
+            "reason": reason,
             "access_count": hits,
             "distinct_users": users,
+            "confirmations": row.get("confirmations") or 0,
+            "contradictions": against,
             "last_accessed_at": row["last_accessed_at"],
         })
     out.sort(key=lambda r: (r["direction"], -r["access_count"]))
@@ -204,6 +231,11 @@ def find_stale(stats, min_age_days: int = 90, now_iso: str = "") -> list:
     out = []
     for row in stats:
         if (row["access_count"] or 0) > 0:
+            continue
+        # Somebody vouched for it since. Unread is not the same as
+        # unwanted, and a prune list that ignores that is how a team
+        # loses the note nobody needed until the day they did.
+        if (row.get("confirmations") or 0) > 0:
             continue
         created = row.get("created_at")
         if not created:
@@ -349,3 +381,127 @@ def triage_pending(pending_nodes, miss_rows, now_iso: str = "") -> list:
         n.get("created_at") or "",
     ))
     return out
+
+
+# ---------------------------------------------------------------------------
+# Evidence
+# ---------------------------------------------------------------------------
+# Whether any of this helps is the one question AgentHive has never been
+# able to answer. It never sees the task, so it cannot judge success on
+# its own - but a session can report back, and git can be asked whether
+# the work survived.
+#
+# Two honesty rules run through everything below.
+#
+# Sessions that reported nothing are counted as UNKNOWN, never folded
+# into the denominator as failures or quietly dropped. A rate computed
+# over whoever bothered to answer is a measure of who answers.
+#
+# And a comparison on thin data is refused outright rather than
+# reported with a caveat nobody reads. A dashboard that prints 100%
+# from two sessions will be screenshotted and quoted; one that says
+# "not enough data" will not.
+
+MIN_SESSIONS_PER_ARM = 20
+
+
+def _rate(rows, key="outcome"):
+    """Success rate over sessions that actually said something."""
+    said = [r for r in rows if r.get(key) in ("succeeded", "partial", "failed")]
+    if not said:
+        return None, 0, 0
+    good = sum(1 for r in said if r[key] == "succeeded")
+    return round(good / len(said), 3), good, len(said)
+
+
+def _survival(rows):
+    checked = [r for r in rows if r.get("work_survived") is not None]
+    if not checked:
+        return None, 0, 0
+    kept = sum(1 for r in checked if r["work_survived"])
+    return round(kept / len(checked), 3), kept, len(checked)
+
+
+def _arm(rows, label):
+    rate, good, said = _rate(rows)
+    surv, kept, checked = _survival(rows)
+    turns = [r["turns"] for r in rows if r.get("turns")]
+    return {
+        "arm": label,
+        "sessions": len(rows),
+        "reported": said,
+        "silent": len(rows) - said,
+        "success_rate": rate,
+        "succeeded": good,
+        "work_survival_rate": surv,
+        "work_verified": checked,
+        "work_survived": kept,
+        "median_turns": sorted(turns)[len(turns) // 2] if turns else None,
+    }
+
+
+def compare_sessions(sessions, min_per_arm: int = MIN_SESSIONS_PER_ARM,
+                      holdout_running: bool = False) -> dict:
+    """Did memory help?
+
+    Three arms, in descending order of how much they prove:
+
+      held_out  - memory deliberately withheld. The only arm that makes
+                  this causal, and the only one that costs something.
+      served    - retrieved and got something.
+      no_memory - never asked. Observational and heavily confounded: a
+                  session that does not ask may differ from one that
+                  does in every way that matters, so this arm is
+                  reported but must not be read as a control.
+    """
+    served, held, none = [], [], []
+    for s in sessions:
+        if s.get("held_out"):
+            held.append(s)
+        elif (s.get("retrievals") or 0) > 0 and (s.get("nodes_served") or 0) > 0:
+            served.append(s)
+        else:
+            none.append(s)
+
+    arms = [_arm(served, "served"), _arm(held, "held_out"), _arm(none, "no_memory")]
+    by = {a["arm"]: a for a in arms}
+
+    # Which arms have to be populated depends on whether a holdout is
+    # actually running. Demanding held_out sessions when nobody turned
+    # the holdout on would report "not enough data" forever, however
+    # much real data accumulated - the report would never say anything
+    # at all, which is a worse failure than saying something qualified.
+    required = ["served", "held_out"] if holdout_running else ["served", "no_memory"]
+    # Both conditions, not just the threshold. A caller can set
+    # min_per_arm to 0, and an arm nobody reported on has no rate to
+    # subtract - computing a delta from two Nones is how this endpoint
+    # returns a 500 instead of an honest "no answer yet".
+    thin = [name for name in required
+            if by[name]["reported"] < min_per_arm
+            or by[name]["success_rate"] is None]
+
+    verdict, note = None, None
+    if thin:
+        note = (
+            f"Not enough reported sessions to compare ({', '.join(thin)}: fewer "
+            f"than {min_per_arm}, or none reporting an outcome at all). No "
+            "verdict is better than one drawn from a handful.")
+    elif holdout_running:
+        delta = by["served"]["success_rate"] - by["held_out"]["success_rate"]
+        verdict = {"comparison": "served vs held_out",
+                   "delta": round(delta, 3), "causal": True}
+        note = ("A holdout is running, so this difference is causal for this "
+                "team's work - not a claim about anyone else's.")
+    else:
+        delta = by["served"]["success_rate"] - by["no_memory"]["success_rate"]
+        verdict = {"comparison": "served vs no_memory",
+                   "delta": round(delta, 3), "causal": False}
+        note = ("No holdout is running, so this is OBSERVATIONAL and not a "
+                "causal claim. Sessions that retrieve differ from sessions "
+                "that do not in ways nothing here controls for - the people "
+                "who reach for memory may simply be doing the kind of work "
+                "memory suits. Set AGENTHIVE_HOLDOUT_PERCENT to find out.")
+
+    return {"arms": arms, "verdict": verdict, "note": note,
+            "min_sessions_per_arm": min_per_arm,
+            "holdout_running": holdout_running}

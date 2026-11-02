@@ -241,3 +241,32 @@ def client_lib():
     sys.path.insert(0, ROOT)
     import client as client_module
     return client_module
+
+
+@pytest.fixture()
+def live_server_holdout(tmp_path):
+    """Same as live_server with a 100% holdout, so the withheld path is
+    testable at all. In production this is a small percentage and off by
+    default - it degrades real sessions to buy evidence."""
+    port = _free_port()
+    db_path = str(tmp_path / "test.db")
+    env = dict(os.environ)
+    env.pop("DATABASE_URL", None)
+    env["AGENTHIVE_RATE_LIMIT_PER_MINUTE"] = "100000"
+    env["AGENTHIVE_LOG_JSON"] = "true"
+    env["AGENTHIVE_HOLDOUT_PERCENT"] = "100"
+    proc = subprocess.Popen(
+        [sys.executable, "server.py", "--port", str(port), "--db", db_path,
+         "--host", "127.0.0.1"],
+        cwd=ROOT, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+    )
+    base_url = f"http://127.0.0.1:{port}"
+    try:
+        _wait_for(base_url + "/healthz")
+        yield base_url
+    finally:
+        proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()

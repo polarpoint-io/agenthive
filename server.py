@@ -79,6 +79,7 @@ the write -> review -> retrieve journey as OpenTelemetry traces (see
 tracing.py and ONBOARDING.md); off by default, zero cost when unset.
 """
 import argparse
+import hashlib
 import json
 import logging
 import os
@@ -205,6 +206,11 @@ ROUTES = [
     # The memory-processing layer (insights.py). Everything here is a
     # PROPOSAL - read-only, nothing applied. /tiers/apply is the single
     # exception and is admin-triggered, never automatic.
+    (re.compile(r"^/teams/(?P<team_id>[\w-]+)/memory/(?P<node_id>[\w-]+)/feedback$"), "POST", "feedback", "member"),
+    (re.compile(r"^/teams/(?P<team_id>[\w-]+)/disputed$"), "GET", "disputed", "admin"),
+    (re.compile(r"^/teams/(?P<team_id>[\w-]+)/evidence$"), "GET", "evidence", "member"),
+    (re.compile(r"^/teams/(?P<team_id>[\w-]+)/sessions/unverified$"), "GET", "unverified", "member"),
+    (re.compile(r"^/teams/(?P<team_id>[\w-]+)/sessions/(?P<session_id>[\w.-]+)/verify$"), "POST", "verify_session", "member"),
     (re.compile(r"^/teams/(?P<team_id>[\w-]+)/gaps$"), "GET", "gaps", "member"),
     (re.compile(r"^/teams/(?P<team_id>[\w-]+)/aliases$"), "POST", "create_alias", "admin"),
     (re.compile(r"^/teams/(?P<team_id>[\w-]+)/aliases$"), "GET", "list_aliases", "admin"),
@@ -629,6 +635,7 @@ class Handler(BaseHTTPRequestHandler):
         # everything that survives this; what it will never see is a secret
         # the author already marked as not-for-sharing. Title is stripped
         # too - it is the one field the review queue renders in full.
+        session_id = body.get("session_id") or ""
         clean_title, t_stripped = governance.strip_private(body["title"])
         clean_body, b_stripped = governance.strip_private(body["body"])
         stripped = t_stripped + b_stripped
@@ -658,6 +665,15 @@ class Handler(BaseHTTPRequestHandler):
                 metrics.record_auto_reject(auto_rejected)
         metrics.record_write(auto_approved=bool(node.get("auto_approved")),
                              tags=node.get("tags"))
+        if session_id:
+            outcome = body.get("outcome")
+            turns = body.get("turns")
+            STORE.record_session_outcome(
+                params["team_id"], session_id, user["id"],
+                outcome=outcome, turns=int(turns) if turns else None,
+                commit_sha=body.get("commit_sha"),
+            )
+            metrics.record_session_report(outcome, turns)
         if node["status"] == "approved" and CACHE is not None:
             with tracing.TRACER.start_as_current_span("cache.invalidate_team"):
                 CACHE.invalidate_team(params["team_id"])  # a new approved node changes the graph
@@ -761,11 +777,39 @@ class Handler(BaseHTTPRequestHandler):
         # Default "full" keeps every existing caller - the MCP server, the
         # review UI, client.py, anyone's .cursor/rules - returning exactly
         # the bytes they returned before this route learned a second mode.
+        session_id = (query.get("session_id") or [""])[0]
         mode = ((query.get("mode") or ["full"])[0] or "full").lower()
         if mode not in ("full", "index"):
             raise ValueError("mode must be 'full' or 'index'")
         tag_filter = [t for t in (query.get("tags") or [None])[0].split(",")] \
             if (query.get("tags") or [None])[0] else []
+
+        # The holdout, if one is running. Deterministic on the session id
+        # so a session is in or out for its whole life - flipping halfway
+        # through would measure nothing. Off unless an admin turned it on.
+        held_out = False
+        if CONFIG.holdout_percent > 0 and session_id:
+            digest = hashlib.sha256(f"{team_id}:{session_id}".encode()).hexdigest()
+            held_out = (int(digest[:8], 16) % 100) < CONFIG.holdout_percent
+
+        if held_out:
+            with tracing.TRACER.start_as_current_span("retrieval.held_out") as span:
+                span.set_attribute("agenthive.held_out", True)
+                STORE.touch_session(team_id, session_id, user["id"], held_out=True)
+            metrics.record_holdout()
+            # Said out loud. A silently empty result would look like a
+            # graph with nothing in it, and the caller would have no way
+            # to tell the difference.
+            self._send(200, {
+                "anchor": anchor, "resolution": "held_out",
+                "team_node_count": 0, "neighborhood_count": 0, "neighborhood": [],
+                "approx_tokens": 0, "approx_tokens_full_team": 0, "reduction_pct": 0,
+                "held_out": True,
+                "note": ("This session is in a measurement holdout, so memory was "
+                         "withheld deliberately. Work as if the graph were empty. "
+                         "See AGENTHIVE_HOLDOUT_PERCENT."),
+            })
+            return 200
 
         cache_status = "disabled"
         cross_user = False
@@ -788,7 +832,8 @@ class Handler(BaseHTTPRequestHandler):
                 span.set_attribute("agenthive.hub_cutoff", hub_cutoff)
                 approved = STORE.approved_nodes(team_id)
                 result = retrieve(approved, anchor, hops=hops, hub_cutoff=hub_cutoff,
-                                  aliases=STORE.alias_map(team_id))
+                                  aliases=STORE.alias_map(team_id),
+                                  feedback=STORE.feedback_counts(team_id))
                 span.set_attribute("agenthive.neighborhood_count", result["neighborhood_count"])
                 span.set_attribute("agenthive.approx_tokens", result["approx_tokens"])
                 span.set_attribute("agenthive.reduction_pct", result["reduction_pct"])
@@ -828,6 +873,9 @@ class Handler(BaseHTTPRequestHandler):
 
         payload = project_index(result) if mode == "index" else result
         metrics.record_retrieval(payload, cache_status, cross_user, mode=mode)
+        STORE.touch_session(team_id, session_id, user["id"],
+                            nodes=payload.get("neighborhood_count", 0),
+                            tokens=payload.get("approx_tokens", 0))
 
         self._send(200, payload)
         return 200
@@ -867,6 +915,76 @@ class Handler(BaseHTTPRequestHandler):
         return 200
 
     # ---- memory processing: proposals from the graph's own use ----
+
+    def h_feedback(self, params, query, user):
+        """A later session's verdict on a note it actually used.
+
+        Member-level: the people using the memory are the only ones who
+        can tell you it was wrong, and routing that through an admin
+        would mean the report never gets made.
+
+        A contradiction raises a flag, never removes anything. The node
+        stays retrievable, stops climbing the tiers, and lands on the
+        disputed list for a human. Anything stronger would hand every
+        caller a way to blank the graph one verdict at a time."""
+        body = self._body()
+        verdict = body.get("verdict")
+        with tracing.TRACER.start_as_current_span("memory.feedback") as span:
+            span.set_attribute("agenthive.memory_node_id", params["node_id"])
+            span.set_attribute("agenthive.verdict", str(verdict))
+            counts = STORE.record_feedback(
+                params["team_id"], params["node_id"], user["id"],
+                verdict, body.get("reason", ""),
+            )
+        metrics.record_feedback(verdict)
+        # Verdicts ride along in retrieval results, so a cached
+        # neighbourhood now carries stale counts.
+        if CACHE is not None:
+            CACHE.invalidate_team(params["team_id"])
+        self._send(200, counts)
+        return 200
+
+    def h_disputed(self, params, query, user):
+        """Approved nodes a later session says are wrong.
+
+        The review queue has only ever looked at what is trying to get
+        IN. This is the other direction: what is already in and should
+        probably come out."""
+        disputed = STORE.list_disputed(params["team_id"])
+        metrics.record_proposals("disputed", len(disputed))
+        self._send(200, {"disputed": disputed})
+        return 200
+
+    def h_evidence(self, params, query, user):
+        """Did memory help? The one question this never used to be able
+        to answer, and the answer is allowed to be "not enough data"."""
+        min_arm = int((query.get("min_per_arm") or [insights.MIN_SESSIONS_PER_ARM])[0])
+        sessions = STORE.list_sessions(params["team_id"])
+        report = insights.compare_sessions(
+            sessions, min_per_arm=min_arm,
+            holdout_running=CONFIG.holdout_percent > 0)
+        report["holdout_percent"] = CONFIG.holdout_percent
+        self._send(200, report)
+        return 200
+
+    def h_unverified(self, params, query, user):
+        """Sessions that recorded a commit nobody has checked yet. The
+        hook asks for these at session start and answers from git."""
+        self._send(200, {"sessions": STORE.sessions_awaiting_verification(
+            params["team_id"])})
+        return 200
+
+    def h_verify_session(self, params, query, user):
+        """Did that session's work survive? Answered from git by the
+        hook, not self-reported - nobody is grading their own homework."""
+        body = self._body()
+        survived = body.get("survived")
+        if not isinstance(survived, bool):
+            raise ValueError("survived must be true or false")
+        STORE.record_work_survival(params["team_id"], params["session_id"], survived)
+        metrics.record_work_survival(survived)
+        self._send(200, {"session_id": params["session_id"], "work_survived": survived})
+        return 200
 
     def h_gaps(self, params, query, user):
         """Member-level on purpose. An agent starting work should be able

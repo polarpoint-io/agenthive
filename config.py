@@ -70,6 +70,24 @@ class Config:
     # character count to turn it on.
     auto_reject_body_under: int = _int("AGENTHIVE_AUTO_REJECT_BODY_UNDER", 0)
 
+    # --- the holdout ----------------------------------------------------
+    # A percentage of sessions that get NO memory, so that "did memory
+    # help" is a comparison rather than a correlation. Everything else
+    # AgentHive measures is observational: sessions that retrieve differ
+    # from sessions that don't in ways nobody controls for, and the
+    # people who use memory may simply be the people doing the kind of
+    # work memory suits.
+    #
+    # OFF by default, and it has to stay that way. This deliberately
+    # degrades real sessions to buy evidence, which is a trade only the
+    # team running it can consent to. When on, a held-out retrieval says
+    # so in its response - nothing is silently withheld.
+    #
+    # Selection is per SESSION, not per retrieval, and deterministic on
+    # the session id: a session flipping in and out of the holdout
+    # halfway through would measure nothing at all.
+    holdout_percent: int = _int("AGENTHIVE_HOLDOUT_PERCENT", 0)
+
     # 0 (default) means tokens never expire on their own - the original
     # behavior, and still correct for a small team that rotates tokens by
     # hand. Set to expire new/rotated tokens automatically after this many

@@ -45,10 +45,16 @@ tracing.init_tracing()
 
 
 class TeamMemoryClient:
-    def __init__(self, base_url: str, api_key: str, team_id: str):
+    def __init__(self, base_url: str, api_key: str, team_id: str,
+                  session_id: str = ""):
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key
         self.team_id = team_id
+        # Opaque to AgentHive. Pass the same value for one agent session
+        # and the evidence endpoint can tell sessions that got memory
+        # from sessions that did not; leave it empty and everything
+        # still works, minus the evidence.
+        self.session_id = session_id
 
     def _request(self, method: str, path: str, body: dict = None, query: dict = None,
                  span_name: str = None):
@@ -88,12 +94,18 @@ class TeamMemoryClient:
 
     # ---- the two calls an agent session actually makes ----
 
+    def evidence(self) -> dict:
+        """Did memory help? Returns per-arm success and work-survival
+        rates, or a refusal if there is not enough reported data."""
+        return self._request("GET", "/teams/" + self._team_id() + "/evidence")
+
     def retrieve_context(self, anchor: str, hops: int = 2, hub_cutoff: int = 15) -> dict:
         """Call at the start of a session. Returns a bounded neighborhood of
         approved team memory around `anchor`, not a full dump."""
         return self._request(
             "GET", "/teams/" + self._team_id() + "/memory/retrieve",
-            query={"anchor": anchor, "hops": hops, "hub_cutoff": hub_cutoff},
+            query={"anchor": anchor, "hops": hops, "hub_cutoff": hub_cutoff,
+                   **({"session_id": self.session_id} if self.session_id else {})},
             span_name="retrieve_context",
         )
 
@@ -124,6 +136,32 @@ class TeamMemoryClient:
             "POST", "/teams/" + self._team_id() + "/memory/fetch",
             body={"ids": list(ids)}, span_name="fetch_nodes",
         )
+
+    def confirm(self, node_id: str, reason: str = "") -> dict:
+        """Say a note you used was right. Counted once per person, so
+        three teammates agreeing is evidence and one agent saying it
+        fifty times is not."""
+        return self._request(
+            "POST", "/teams/" + self._team_id() + "/memory/" + node_id + "/feedback",
+            body={"verdict": "confirmed", "reason": reason}, span_name="confirm",
+        )
+
+    def contradict(self, node_id: str, reason: str = "") -> dict:
+        """Say a note you used was wrong.
+
+        Nothing is removed. The node stops climbing the tiers and lands
+        on the disputed list for a human. A report that could pull a
+        note out of retrieval by itself would be a way to blank the
+        graph one verdict at a time."""
+        return self._request(
+            "POST", "/teams/" + self._team_id() + "/memory/" + node_id + "/feedback",
+            body={"verdict": "contradicted", "reason": reason}, span_name="contradict",
+        )
+
+    def list_disputed(self) -> dict:
+        """Approved nodes a later session says are wrong - the review
+        queue for what is already in the graph."""
+        return self._request("GET", "/teams/" + self._team_id() + "/disputed")
 
     def report_gaps(self, min_count: int = 2) -> dict:
         """What this team keeps looking for and never finds.
@@ -199,7 +237,9 @@ class TeamMemoryClient:
         )
 
     def log_session(self, title: str, body: str, agent_id: str = None,
-                     task_id: str = None, tags=None, links=None, tier: str = "L1") -> dict:
+                     task_id: str = None, tags=None, links=None, tier: str = "L1",
+                     outcome: str = None, turns: int = None,
+                     commit_sha: str = None) -> dict:
         """Call at the end of a session. Writes a memory node - PENDING
         unless an auto-approve rule matches it (see create_auto_approve_rule)."""
         return self._request(
@@ -208,6 +248,13 @@ class TeamMemoryClient:
                 "title": title, "body": body, "agent_id": agent_id,
                 "task_id": task_id, "tags": tags or [], "links": links or [],
                 "tier": tier,
+                # Optional, and the evidence depends on them: which
+                # session this was, whether it worked, how many turns it
+                # took, and what it committed.
+                **({"session_id": self.session_id} if self.session_id else {}),
+                **({"outcome": outcome} if outcome else {}),
+                **({"turns": turns} if turns else {}),
+                **({"commit_sha": commit_sha} if commit_sha else {}),
             },
             span_name="log_session",
         )

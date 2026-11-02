@@ -270,6 +270,112 @@ worked out instead of assumed - see `observability/README.md`, which is
 explicit that if the difference trends to zero the layer is costing a
 round trip and buying nothing.
 
+## Does any of this help?
+
+For a long time the honest answer was that nobody knew. AgentHive could
+tell you how many tokens it withheld and how often memory was reused,
+and neither says whether the work went better.
+
+It still never sees the task, so it cannot judge success by itself. What
+it can do is thread a session through retrieval and logging, let the
+session report back, and let git answer the part nobody should be asked
+to self-report:
+
+```python
+client = TeamMemoryClient(url, token, team_id, session_id="...")
+context = client.retrieve_context("Postgres connection pool exhaustion")
+...
+client.log_session(title="...", body="...",
+                   outcome="succeeded", turns=14, commit_sha=head_sha)
+```
+
+`GET /teams/{id}/evidence` then compares sessions that got memory
+against those that did not:
+
+| Arm | What it is |
+|---|---|
+| `served` | retrieved and got something back |
+| `held_out` | memory deliberately withheld (see below) |
+| `no_memory` | never asked |
+
+Two things it refuses to do. A session that reports no outcome is
+**unknown**, never folded into the denominator as a success or a
+failure. And a comparison on thin data is **refused outright** rather
+than printed with a caveat nobody reads — a dashboard showing 100% from
+two sessions gets screenshotted and quoted.
+
+### Correlation, until you run a holdout
+
+Without a holdout the comparison is observational, and the endpoint says
+so in the response: sessions that reach for memory differ from sessions
+that do not in ways nothing here controls for.
+
+`AGENTHIVE_HOLDOUT_PERCENT` withholds memory from that share of
+sessions, chosen deterministically per session so nothing flips halfway
+through, and **tells each held-out session it is being held out** — a
+silently empty result is indistinguishable from an empty graph.
+
+It is off by default. It buys evidence by making some sessions worse,
+and only the team living with that can agree to it.
+
+### The token numbers are tokens, not money
+
+`tokens_avoided_total` counts tokens not sent. Cached re-reads cost a
+fraction of a fresh read, and retrieved content is paid for on every
+turn after it enters the context — so the real saving is likely several
+times the headline figure.
+[`observability/README.md`](observability/README.md) has the pricing
+expression and the reasons not to quote a currency figure from it.
+
+## Corroboration: was it still true?
+
+Tiers measure whether a note is **read**. That is popularity, not truth
+— so a note that is wrong but useful-looking keeps being retrieved,
+keeps climbing, and ends up ranked canonical. The system confidently
+amplifying the one thing it should have caught.
+
+A later session that actually used a note can say so:
+
+```python
+client.confirm(node_id)                              # used it, it was right
+client.contradict(node_id, reason="already was 400") # used it, it was wrong
+```
+
+Both are **member**-level. The people using the memory are the only ones
+who can tell you it was wrong, and routing that through an admin means
+the report never gets made.
+
+### A contradiction reports, it never removes
+
+The node stays retrievable. It stops climbing the tiers, carries its
+counts in every retrieval result, and lands on `GET /teams/{id}/disputed`
+for a human. Anything stronger would hand every caller a way to blank
+the graph one verdict at a time — the attack the approval gate exists to
+prevent, arriving from the direction nobody watches.
+
+| Contradictions | Effect |
+|---|---|
+| 1 | held at its current tier, cannot be promoted on popularity |
+| 2+ | proposed for demotion to L1 |
+| any | listed on `/disputed` for review |
+
+It takes more to demote than to stop a climb: one objection should not
+override a team that relies on the note.
+
+### Counted per person, not per call
+
+One verdict per `(node, user)`. An agent confirming the same note fifty
+times in an afternoon is one person's opinion fifty times; three
+teammates agreeing is evidence. The same reasoning as tiers counting
+distinct users rather than repeat hits. Changing your mind replaces your
+verdict rather than adding a second one.
+
+Verdicts travel **with the node** in retrieval results, not just in a
+dashboard — a reader deciding how much to trust a note needs them there.
+
+And a note somebody has vouched for is never swept into the stale prune
+list, however long since anyone read it. Unread is not unwanted.
+
 ## Anchor aliases
 
 Resolution is exact title, then token overlap. So "pg pool dying" finds

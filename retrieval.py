@@ -195,7 +195,7 @@ def traverse(graph: dict, anchor_title: str, hops: int = 2, hub_cutoff: int = 15
 
 
 def retrieve(approved_nodes: list, anchor_title: str, hops: int = 2,
-             hub_cutoff: int = 15, aliases=None) -> dict:
+             hub_cutoff: int = 15, aliases=None, feedback=None) -> dict:
     """High-level entry point used by the server. Returns the neighborhood
     plus an approximate token count, same shape as retrieve.py --show-tokens."""
     graph = build_graph(approved_nodes)
@@ -241,6 +241,10 @@ def retrieve(approved_nodes: list, anchor_title: str, hops: int = 2,
             {
                 "id": n["id"], "title": n["title"], "tier": n["tier"],
                 "body": n["body"],
+                # What later sessions said. A reader deciding how much
+                # to trust a note needs this next to the note, not in a
+                # dashboard somebody looks at monthly.
+                **(feedback or {}).get(n["id"], {"confirmations": 0, "contradictions": 0}),
                 # Carried so project_index() can hand an agent something to
                 # filter on without reading a single body. Costs a few bytes
                 # on the full response; makes the index layer worth having.
@@ -306,6 +310,8 @@ def project_index(result: dict) -> dict:
             "title": node["title"],
             "tier": node["tier"],
             "tags": node.get("tags") or [],
+            "confirmations": node.get("confirmations", 0),
+            "contradictions": node.get("contradictions", 0),
             # What fetching THIS body would cost, so the choice is priced
             # per node rather than as one opaque total.
             "approx_tokens": len(body) // 4,

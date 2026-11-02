@@ -226,6 +226,43 @@ TIER_CHANGES = Counter(
     "oscillating.",
     ["direction"], registry=REGISTRY,  # direction: promote | demote
 )
+# ---------------------------------------------------------------------------
+# Evidence
+# ---------------------------------------------------------------------------
+SESSION_OUTCOMES = Counter(
+    "agenthive_session_outcomes_total",
+    "What sessions reported about themselves, by whether memory was served. "
+    "Self-reported and voluntary: read it next to work_survival, which is not.",
+    ["outcome", "arm"], registry=REGISTRY,  # arm: served | held_out | no_memory
+)
+SESSION_TURNS = Histogram(
+    "agenthive_session_turns",
+    "Turns per session. This is the multiplier on every token a retrieval "
+    "put in the context: content sent once is re-read on every turn after, "
+    "so the saving from sending less compounds with this number.",
+    buckets=(1, 2, 3, 5, 8, 13, 21, 34, 55, 89), registry=REGISTRY,
+)
+WORK_SURVIVAL = Counter(
+    "agenthive_work_survival_total",
+    "Whether a session's commit was still an ancestor of HEAD when a later "
+    "session checked. Objective, unlike the self-reported outcome, and "
+    "nobody has to remember to send it.",
+    ["survived"], registry=REGISTRY,
+)
+HOLDOUT = Counter(
+    "agenthive_holdout_retrievals_total",
+    "Retrievals deliberately served nothing to measure what memory is worth. "
+    "Zero unless AGENTHIVE_HOLDOUT_PERCENT was turned on.",
+    registry=REGISTRY,
+)
+
+FEEDBACK = Counter(
+    "agenthive_memory_feedback_total",
+    "Verdicts later sessions passed on notes they used. Contradictions "
+    "rising while nothing lands on the disputed queue means people are "
+    "reporting and nobody is resolving - the graph is knowingly wrong.",
+    ["verdict"], registry=REGISTRY,  # confirmed | contradicted
+)
 PROPOSALS = Counter(
     "agenthive_proposals_raised_total",
     "Proposals computed by the memory-processing layer, by kind. Counted "
@@ -290,6 +327,11 @@ class DbStatsCollector:
             "Phrasings a human has mapped to a node, across all teams. Each "
             "one converts a repeat miss into a permanent exact hit.",
         )
+        disputed = GaugeMetricFamily(
+            "agenthive_disputed_nodes",
+            "Approved nodes a later session has contradicted and nobody has "
+            "resolved. Unlike a pending node, these are being SERVED.",
+        )
         db_up = GaugeMetricFamily(
             "agenthive_db_up", "1 when the storage backend answers, 0 when it does not"
         )
@@ -306,6 +348,7 @@ class DbStatsCollector:
                 open_gaps.add_metric([], _STORE.global_open_gap_count())
                 oldest_pending.add_metric([], _STORE.global_oldest_pending_age_seconds())
                 aliases.add_metric([], _STORE.global_alias_count())
+                disputed.add_metric([], _STORE.global_disputed_count())
                 db_up.add_metric([], 1 if _STORE.healthcheck() else 0)
             except Exception:
                 # A metrics scrape must never 500 the process. db_up is
@@ -321,6 +364,7 @@ class DbStatsCollector:
         yield open_gaps
         yield oldest_pending
         yield aliases
+        yield disputed
         yield db_up
 
 
@@ -453,3 +497,26 @@ def record_auto_reject(reason: str):
     else:
         cause = "rule"
     AUTO_REJECTED.labels(cause=cause).inc()
+
+
+def record_feedback(verdict: str):
+    if verdict in ("confirmed", "contradicted"):
+        FEEDBACK.labels(verdict=verdict).inc()
+
+
+def record_session_report(outcome: str = None, turns=None, arm: str = "served"):
+    if outcome in ("succeeded", "partial", "failed", "unknown"):
+        SESSION_OUTCOMES.labels(outcome=outcome, arm=arm).inc()
+    try:
+        if turns:
+            SESSION_TURNS.observe(int(turns))
+    except (TypeError, ValueError):
+        pass
+
+
+def record_work_survival(survived: bool):
+    WORK_SURVIVAL.labels(survived="yes" if survived else "no").inc()
+
+
+def record_holdout():
+    HOLDOUT.inc()

@@ -1,3 +1,50 @@
+## What these numbers are, and what they are not
+
+`agenthive_tokens_avoided_total` counts **tokens not sent**. It is not
+money, and the docs used to let the two slide into each other.
+
+Three reasons the gap matters, and they do not all point the same way:
+
+1. **Tokens are estimated** at four characters each. Close enough for a
+   trend, wrong for an invoice.
+2. **Cached re-reads cost a fraction of a fresh read.** Providers charge
+   roughly a tenth for a cache hit and a premium for the write.
+3. **Retrieved content is paid for on every turn after.** It sits in the
+   prompt for the rest of the session, so bytes you never send are bytes
+   you never re-read.
+
+Point 3 is the big one, and it means this metric almost certainly
+**understates** the saving. A 2,300-token neighbourhood in a twenty-turn
+session is one cache write plus nineteen cache reads, not one payment.
+`agenthive_session_turns` is recorded so that multiplier is measurable
+rather than assumed.
+
+### Working out what it actually cost you
+
+The server does not know your provider's prices and should not guess, so
+it exports the raw counts and leaves the arithmetic here. Substitute
+your own rates:
+
+```promql
+# cost-weighted tokens avoided, in units of fresh input tokens
+#   $cache_read  ~ 0.1   (a cached re-read, as a fraction of fresh)
+#   $cache_write ~ 1.25  (the premium on first send)
+#   $turns       = median session length, from agenthive_session_turns
+(
+  increase(agenthive_tokens_avoided_total[7d])
+  * ($cache_write + ($turns - 1) * $cache_read)
+)
+```
+
+With `cache_read=0.1`, `cache_write=1.25` and a median of 12 turns, a
+token not sent is worth about 2.35 fresh tokens — so the headline number
+is roughly a third of the real saving.
+
+Do not publish a currency figure from this without checking it against a
+provider invoice at least once. An estimate derived from four-characters-
+per-token and a median turn count is a direction of travel, not an
+accounting record.
+
 # Observability
 
 AgentHive's whole premise is a bet: a curated, bounded, shared memory
@@ -321,3 +368,72 @@ calling retrieval at the start of a session.
 The reason string carries node and rule ids and is bucketed to three
 label values before it reaches a metric. Ids in a label set is how a
 metrics endpoint becomes a memory leak.
+
+
+## Corroboration
+
+| Metric | Meaning |
+|---|---|
+| `agenthive_memory_feedback_total{verdict}` | `confirmed` / `contradicted` from sessions that used a note. |
+| `agenthive_disputed_nodes` | Approved nodes contradicted and unresolved (gauge). |
+
+The shape to alert on is **contradictions rising while `disputed_nodes`
+never falls**: people are reporting, nobody is resolving, and the graph
+is knowingly serving notes somebody has already said are wrong. Unlike a
+pending node, these are being read right now.
+
+```promql
+agenthive_disputed_nodes > 0
+  and increase(agenthive_memory_feedback_total{verdict="contradicted"}[7d]) > 0
+```
+
+A healthy ratio of `confirmed` to `contradicted` is also the closest
+thing here to an answer on whether the graph is any *good* — which is
+otherwise unmeasured. It is a weak proxy and should not be mistaken for
+one: it says what the people who bothered to report think, not what is
+true.
+
+
+## Did memory help?
+
+The question AgentHive could never answer. It never sees the task, so it
+cannot judge success on its own — but a session can report back, and git
+can be asked whether the work survived.
+
+| Metric | Meaning |
+|---|---|
+| `agenthive_session_outcomes_total{outcome,arm}` | What sessions said about themselves, split by whether memory was served. |
+| `agenthive_work_survival_total{survived}` | Whether a session's commit was still an ancestor of HEAD later. Objective; nobody reports it about themselves. |
+| `agenthive_session_turns` | Turns per session — the multiplier on every retrieved token. |
+| `agenthive_holdout_retrievals_total` | Retrievals deliberately served nothing. Zero unless you turned the holdout on. |
+
+`GET /teams/{id}/evidence` does the comparison. Read it with two things
+in mind.
+
+**A silent session is unknown, not a success.** Sessions that report no
+outcome are counted separately and kept out of the denominator. A rate
+computed over whoever bothered to answer measures who answers.
+
+**Without a holdout, the verdict is correlation.** Sessions that reach
+for memory differ from sessions that do not in ways nothing here
+controls for — the people using it may simply be doing the kind of work
+it suits. The endpoint labels this `causal: false` and says so in prose.
+
+### Getting a causal answer
+
+`AGENTHIVE_HOLDOUT_PERCENT` withholds memory from that percentage of
+sessions, chosen deterministically per session, and tells each one it is
+being held out. Then `served` versus `held_out` is a real experiment.
+
+It is **off by default and should stay that way** unless you have
+decided to run it. It buys evidence by deliberately making some sessions
+worse, which is a trade only the team living with it can consent to.
+Start at 5–10%, run it for a few weeks, and turn it off once the
+comparison has enough sessions in both arms.
+
+### What would settle it properly
+
+A holdout answers "does this help us". It does not answer "does this
+help anyone", and nothing in a production deployment can. That needs a
+benchmark — the same tasks run with and without, repeated — which is
+what `experiments/` is for.

@@ -1,0 +1,3 @@
+{"task_id": "demo-1", "repo": "acme/widgets", "prompt": "The widget cache never expires. Fix it.", "test_cmd": "python -m pytest tests/test_cache.py -q"}
+{"task_id": "demo-2", "repo": "acme/widgets", "prompt": "Widget cache expiry is off by one hour in DST. Fix it.", "test_cmd": "python -m pytest tests/test_cache.py -q"}
+{"task_id": "demo-3", "repo": "acme/gadgets", "prompt": "Gadget serialisation drops nulls. Fix it.", "test_cmd": "python -m pytest -q"}
