@@ -4,24 +4,24 @@
 LAYOUT_WITH_LEGEND()
 title AgentHive - Container Diagram
 
-Person(admin, "Team Admin", "Reviews pending memory, manages users and auto-approve rules")
-Person(member, "Team Member", "Runs a coding-agent session against the team's memory")
+Person(admin, "Team Admin", "Reviews the queue and the disputed list, accepts or ignores proposals")
+Person(member, "Team Member", "Runs a coding-agent session")
 
-System_Ext(coding_agent, "Coding Agent Session", "client.py - retrieval at session start, log_session at session end")
-System_Ext(session_hook, "Session-End Hook", "Spawned by the harness outside the agent's loop, so it runs even when the session crashed or was truncated")
-System_Ext(otel_backend, "OTLP Backend", "Jaeger, Tempo, or any OTLP/HTTP-compatible tracing backend")
+System_Ext(coding_agent, "Coding Agent Session", "Retrieval at session start, feedback on notes used, log at the end")
+System_Ext(plugin, "AgentHive Plugin", "Harness hooks, outside the agent's loop - facts, tool-usage evidence, session-end backstop")
+System_Ext(otel_backend, "OTLP Backend", "Jaeger, Tempo or any OTLP/HTTP backend")
 System_Ext(prometheus, "Prometheus", "Scrapes on an interval")
 
 System_Boundary(agenthive, "AgentHive") {
-  Container(api, "AgentHive Service", "Python 3.11, stdlib http.server (ThreadingHTTPServer)", "Auth + rate limiting; the approval gate, which also strips author-marked private blocks before storage and holds reserved-tag writes for human review however broad an auto-approve rule is; bounded retrieval by traversal, served either in full or as an index with bodies withheld for a follow-up fetch; a memory-processing layer that turns the access log, the miss log and past review decisions into proposals (missing links, tier changes, candidate auto-approve rules) without ever applying them or calling a model; the review UI (GET /ui); Prometheus metrics (GET /metrics); OpenTelemetry spans")
-  ContainerDb(db, "Memory Store", "SQLite file or PostgreSQL", "Teams, users, agents, tasks, tiered memory nodes (pending / approved / rejected), the per-retrieval access log, and the aggregated miss log - the last two being what the service reads back to reason about its own use")
-  ContainerDb(cache, "Rate Limiter + Retrieval Cache", "In-memory (single replica) or Redis (shared across replicas)", "Per-token rate-limit counters; one cached traversal per anchor, serving both disclosure modes from the same entry, with cross-user reuse tracking")
+  Container(api, "AgentHive Service", "Python 3.11, stdlib http.server", "Auth and rate limiting; the approval gate, which strips author-marked private blocks before storage and holds reserved-tag writes for human review; retrieval by bounded traversal, resolved by exact title then human-recorded alias then token fallback, and served full or as an index depending on size; environment facts injected without an anchor; a measurement holdout that withholds memory from a deterministic share of sessions and says so; the review UI; metrics; OpenTelemetry spans")
+  ContainerDb(db, "Memory Store", "SQLite file or PostgreSQL", "Teams, users, agents and tasks; tiered memory nodes (pending / approved / rejected) with the verdicts later sessions passed on them; anchor aliases; the per-retrieval access log; the aggregated miss log; pooled tool-usage evidence; and one row per agent session, which is what makes 'did memory help' answerable at all")
+  ContainerDb(cache, "Rate Limiter + Retrieval Cache", "In-memory (single replica) or Redis (shared)", "Per-token rate-limit counters; one cached traversal per anchor serving both disclosure modes, invalidated on anything that changes what retrieval would return - including a rejection, which used to be missed")
 }
 
 Rel(member, coding_agent, "Runs")
-Rel(coding_agent, api, "retrieve_context, or retrieve_index then fetch_nodes / log_session", "HTTPS/JSON, X-API-Key")
-Rel(session_hook, api, "Records an unsummarised session when the agent logged nothing", "HTTPS/JSON, X-API-Key")
-Rel(admin, api, "Reviews, manages users, configures rules, accepts or ignores proposals", "HTTPS")
+Rel(coding_agent, api, "Retrieve, fetch, gaps, feedback, log", "HTTPS/JSON, X-API-Key")
+Rel(plugin, api, "Facts, tool usage, unsummarised sessions", "HTTPS/JSON, X-API-Key")
+Rel(admin, api, "Reviews, resolves disputes, configures rules and aliases", "HTTPS")
 Rel(api, db, "Reads/writes", "SQL")
 Rel(api, cache, "Rate-limit checks, cache lookups and writes", "in-process, or Redis protocol")
 Rel(api, otel_backend, "Exports spans when tracing is enabled", "OTLP/HTTP")

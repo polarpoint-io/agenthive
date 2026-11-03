@@ -300,6 +300,109 @@ rather than requiring a fresh database. See `db.py`.
   (Prometheus Operator) or plain `prometheus.io/*` pod annotations for
   metrics scraping. See `helm/agenthive/README.md`.
 
+## Disclosure is adaptive, not opt-in
+
+Progressive disclosure shipped as an opt-in mode and saved almost
+nothing, because an agent cannot know a neighbourhood is wide *before*
+retrieving it. It took the documented default every time and the
+mechanism never ran.
+
+The server already knows the size — it has just computed it. Over
+`AGENTHIVE_AUTO_INDEX_OVER` a retrieval that expressed no preference
+gets the index and is told why. An explicit `mode` is always honoured.
+
+The general lesson, which applies to anything added here next: a
+mechanism that needs the agent to choose correctly, on information it
+does not have, will not run.
+
+## A contradiction reports; it never removes
+
+Tiers measure whether a note is *read*, which is popularity rather than
+truth, so a note that is wrong but useful-looking climbs and ends up
+ranked canonical. Sessions can now confirm or contradict a note they
+used.
+
+A contradiction does **not** withdraw the note. It holds it at its tier,
+lists it on `/disputed`, and a human decides. Anything stronger hands
+every caller a way to blank the graph one verdict at a time — the attack
+the approval gate exists to prevent, arriving from the direction nobody
+watches.
+
+Two contradictions propose demotion where one only stops promotion: it
+should take more to push a note down than to stop it climbing, because
+a single objection must not override a team that relies on it.
+
+Verdicts count once per `(node, user)`. Fifty confirmations from one
+agent is one opinion fifty times.
+
+## Environment facts are injected unasked, and capped for it
+
+Most memory here is retrieved by anchor. An `env-fact` is not: it is
+injected into every session for the team with no anchor and no tool
+call.
+
+That is deliberate and it is the only path that **replaces** work rather
+than adding to context — an agent told the test command in fifty tokens
+does not read fifteen files to find it. It is also the most dangerous
+path in the system, so facts are capped at 200 characters at write time,
+ordered by corroboration, and **anything contradicted is excluded
+outright**. An unconditionally injected falsehood is the worst thing
+AgentHive can do.
+
+## Tool-usage evidence is pooled across the team
+
+Kept per machine — the obvious design — every engineer spends their own
+five sessions deriving the same deny list and a new joiner starts from
+nothing. A team already has the evidence; it had nowhere to put it.
+
+A tool is only proposed for pruning on evidence from more than one
+person. One engineer who never uses a tool is a preference; a whole team
+is a fact.
+
+## No model, including in the plugin
+
+The no-proxy decision above is about the service. When the plugin
+arrived it would have been easy to treat that as satisfied and put a
+judge model in the hook instead — the loop guard is the obvious place
+for one, and it would still be true that AgentHive never called an LLM.
+
+It would also have missed the point. The rule is that nothing in this
+system decides what memory means by asking a model, because memory you
+cannot audit is worse than memory you do not have. The loop guard counts
+repeated failures locally, with error fingerprints that ignore line
+numbers and quoted strings. It is cruder than a judge and it is
+auditable.
+
+The guard never stops a turn either. It redirects once, then tells the
+human how to stop it. Interrupting somebody's agent on a heuristic is
+not a call this gets to make.
+
+## Measuring whether any of this helps
+
+`tokens_avoided_total` was the headline number and it compares against
+dumping the whole team graph — a baseline nobody would ever run. It can
+look excellent while real spend is flat, and it did.
+
+The honest baseline is **not running AgentHive at all**. Against that,
+memory *adds* tokens and has to earn them back in work avoided. So
+`tokens_injected_total` records the cost side, and the question moved to
+whether sessions go better.
+
+AgentHive never sees the task, so it cannot judge that alone. A session
+can report an outcome, and git can be asked whether the work survived —
+which nobody has to remember to do. `/evidence` compares sessions that
+got memory against those that did not, and refuses two things: a silent
+session counts as *unknown* rather than entering the denominator, and a
+comparison on thin data is refused outright rather than printed with a
+caveat nobody reads.
+
+Without a holdout that comparison is correlation, and it says so.
+`AGENTHIVE_HOLDOUT_PERCENT` withholds memory from a deterministic share
+of sessions and tells each one, because a silently empty result is
+indistinguishable from an empty graph. It is off by default: it buys
+evidence by making real sessions worse, and only the team living with
+that can consent to it.
+
 ## Open questions
 
 - **No L1→L2→L3 promotion worker.** Everything sits at whatever tier it
@@ -315,3 +418,11 @@ rather than requiring a fresh database. See `db.py`.
 
 Both are deliberately deferred until there's real usage data to design
 against, rather than built speculatively now.
+
+- **Does it actually help?** Unanswered, and now at least measurable.
+  `/evidence` compares arms, but no team has run a holdout long enough
+  to produce a causal answer, and `experiments/` has never driven a real
+  agent.
+
+- **The plugin has never touched a live IDE.** Its logic is covered by
+  offline tests; its contact with each harness is not.

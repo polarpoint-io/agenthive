@@ -81,8 +81,8 @@
   <circle cx="374" cy="297" r="9" fill="none" stroke="#a5b4fc" stroke-width="2"/>
   <circle cx="374" cy="297" r="3" fill="#a5b4fc"/>
   <text x="374" y="333" text-anchor="middle" font-size="12" fill="#e6edf3">Any client</text>
-  <text x="374" y="349" text-anchor="middle" font-size="9" fill="#8b949e">agenthive-mcp · client.py</text>
-  <text x="374" y="370" text-anchor="middle" font-size="8" fill="#4b5563">one personal token each</text>
+  <text x="374" y="349" text-anchor="middle" font-size="9" fill="#8b949e">plugin · 3 harnesses</text>
+  <text x="374" y="370" text-anchor="middle" font-size="8" fill="#4b5563">hooks run outside the loop</text>
 
   <line x1="450" y1="316" x2="500" y2="316" stroke="#3b82f6" stroke-width="2" marker-end="url(#arrow)"/>
   <text x="475" y="308" text-anchor="middle" font-size="9" fill="#3b82f6">HTTP</text>
@@ -100,39 +100,44 @@
   <line x1="522" y1="188" x2="782" y2="188" stroke="#2d4a7a" stroke-width="1"/>
 
   <!-- Endpoints -->
-  <rect x="520" y="198" width="264" height="38" rx="6" fill="#0d1f38" stroke="#1e3a5f" stroke-width="1"/>
-  <rect x="520" y="198" width="4" height="38" rx="2" fill="#3b82f6"/>
-  <text x="536" y="214" font-size="10" fill="#60a5fa" font-weight="bold">retrieve</text>
-  <text x="536" y="228" font-size="9" fill="#6e7681">Approved-only · full, or index then fetch</text>
+  <rect x="520" y="198" width="264" height="32" rx="6" fill="#0d1f38" stroke="#1e3a5f" stroke-width="1"/>
+  <rect x="520" y="198" width="4" height="32" rx="2" fill="#3b82f6"/>
+  <text x="536" y="212" font-size="10" fill="#60a5fa" font-weight="bold">retrieve</text>
+  <text x="536" y="224" font-size="8" fill="#6e7681">Approved-only · index above 800 tokens</text>
 
-  <rect x="520" y="242" width="264" height="38" rx="6" fill="#0d1f38" stroke="#1e3a5f" stroke-width="1"/>
-  <rect x="520" y="242" width="4" height="38" rx="2" fill="#10b981"/>
-  <text x="536" y="258" font-size="10" fill="#6ee7b7" font-weight="bold">log</text>
-  <text x="536" y="272" font-size="9" fill="#6e7681">Starts pending · private blocks stripped</text>
+  <rect x="520" y="236" width="264" height="32" rx="6" fill="#0d1f38" stroke="#1e3a5f" stroke-width="1"/>
+  <rect x="520" y="236" width="4" height="32" rx="2" fill="#22d3ee"/>
+  <text x="536" y="250" font-size="10" fill="#67e8f9" font-weight="bold">facts</text>
+  <text x="536" y="262" font-size="8" fill="#6e7681">Injected unasked · replaces exploration</text>
 
-  <rect x="520" y="286" width="264" height="38" rx="6" fill="#0d1f38" stroke="#1e3a5f" stroke-width="1"/>
-  <rect x="520" y="286" width="4" height="38" rx="2" fill="#f59e0b"/>
-  <text x="536" y="302" font-size="10" fill="#fcd34d" font-weight="bold">approve / reject</text>
-  <text x="536" y="316" font-size="9" fill="#6e7681">Admin-only · reserved tags beat any rule</text>
+  <rect x="520" y="274" width="264" height="32" rx="6" fill="#0d1f38" stroke="#1e3a5f" stroke-width="1"/>
+  <rect x="520" y="274" width="4" height="32" rx="2" fill="#10b981"/>
+  <text x="536" y="288" font-size="10" fill="#6ee7b7" font-weight="bold">log</text>
+  <text x="536" y="300" font-size="8" fill="#6e7681">Pending · private blocks stripped</text>
 
-  <rect x="520" y="330" width="264" height="38" rx="6" fill="#0d1f38" stroke="#1e3a5f" stroke-width="1"/>
-  <rect x="520" y="330" width="4" height="38" rx="2" fill="#8b5cf6"/>
-  <text x="536" y="346" font-size="10" fill="#a78bfa" font-weight="bold">users / tokens</text>
-  <text x="536" y="360" font-size="9" fill="#6e7681">member/admin split, rotate, revoke</text>
+  <rect x="520" y="312" width="264" height="32" rx="6" fill="#0d1f38" stroke="#1e3a5f" stroke-width="1"/>
+  <rect x="520" y="312" width="4" height="32" rx="2" fill="#f59e0b"/>
+  <text x="536" y="326" font-size="10" fill="#fcd34d" font-weight="bold">confirm / contradict</text>
+  <text x="536" y="338" font-size="8" fill="#6e7681">Reports, never removes · one per person</text>
 
-  <rect x="520" y="374" width="264" height="38" rx="6" fill="#0d1f38" stroke="#1e3a5f" stroke-width="1"/>
-  <rect x="520" y="374" width="4" height="38" rx="2" fill="#3b82f6"/>
-  <text x="536" y="390" font-size="10" fill="#60a5fa" font-weight="bold">metrics / tracing</text>
-  <text x="536" y="404" font-size="9" fill="#6e7681">tokens avoided, withheld, reuse, spans</text>
+  <rect x="520" y="350" width="264" height="32" rx="6" fill="#0d1f38" stroke="#1e3a5f" stroke-width="1"/>
+  <rect x="520" y="350" width="4" height="32" rx="2" fill="#8b5cf6"/>
+  <text x="536" y="364" font-size="10" fill="#a78bfa" font-weight="bold">approve / reject</text>
+  <text x="536" y="376" font-size="8" fill="#6e7681">Reserved tags beat any rule</text>
+
+  <rect x="520" y="388" width="264" height="32" rx="6" fill="#0d1f38" stroke="#1e3a5f" stroke-width="1"/>
+  <rect x="520" y="388" width="4" height="32" rx="2" fill="#3b82f6"/>
+  <text x="536" y="402" font-size="10" fill="#60a5fa" font-weight="bold">evidence</text>
+  <text x="536" y="414" font-size="8" fill="#6e7681">served vs held-out · says when unsure</text>
 
   <!-- Storage pills -->
-  <text x="652" y="430" text-anchor="middle" font-size="9" fill="#4b5563" letter-spacing="0.5">STORAGE</text>
-  <rect x="520" y="436" width="66" height="18" rx="9" fill="#1e1b4b"/>
-  <text x="553" y="448" text-anchor="middle" font-size="8" fill="#a5b4fc">SQLite</text>
-  <rect x="592" y="436" width="72" height="18" rx="9" fill="#14532d"/>
-  <text x="628" y="448" text-anchor="middle" font-size="8" fill="#6ee7b7">Postgres</text>
-  <rect x="670" y="436" width="114" height="18" rx="9" fill="#3f1d1d"/>
-  <text x="727" y="448" text-anchor="middle" font-size="8" fill="#fca5a5">Redis (rate-limit)</text>
+  <text x="652" y="438" text-anchor="middle" font-size="9" fill="#4b5563" letter-spacing="0.5">STORAGE</text>
+  <rect x="520" y="444" width="66" height="18" rx="9" fill="#1e1b4b"/>
+  <text x="553" y="456" text-anchor="middle" font-size="8" fill="#a5b4fc">SQLite</text>
+  <rect x="592" y="444" width="72" height="18" rx="9" fill="#14532d"/>
+  <text x="628" y="456" text-anchor="middle" font-size="8" fill="#6ee7b7">Postgres</text>
+  <rect x="670" y="444" width="114" height="18" rx="9" fill="#3f1d1d"/>
+  <text x="727" y="456" text-anchor="middle" font-size="8" fill="#fca5a5">Redis (rate-limit)</text>
 
   <text x="652" y="470" text-anchor="middle" font-size="9" fill="#4b5563" letter-spacing="0.5">AUTH</text>
   <rect x="520" y="476" width="92" height="18" rx="9" fill="#161b22" stroke="#238636" stroke-width="1"/>

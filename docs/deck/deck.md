@@ -130,6 +130,61 @@ A number that can only go up is not a measurement.
 
 ---
 
+# The additive problem
+
+Everything so far **adds** to a context window. Retrieval injects notes;
+notes cost tokens; tokens are the thing we claimed to reduce.
+
+Memory only reduces a bill if it **replaces** something — if a session
+that would have spent fifteen turns discovering which build command
+works instead reads one line and starts.
+
+That is one feature, not a side effect of the others:
+
+**Environment facts.** Tagged `env-fact`, capped at 200 characters,
+injected at session start with no anchor and no tool call. The session
+never runs the exploration.
+
+`tokens_injected_total` sits next to `tokens_avoided_total` in Grafana
+so the subtraction is visible, including when it comes out negative.
+
+---
+
+# Four things that cannot wait for the model
+
+An MCP tool runs when the model decides to call it. These four cannot:
+
+| | |
+|---|---|
+| **Facts** | must land before the first turn |
+| **Tool pruning** | measures tools the model never mentions |
+| **Loop guard** | fires precisely when the model is not noticing |
+| **Session backstop** | runs when the session already crashed |
+
+So they are hooks, not tools — spawned by the harness, outside the loop.
+**A hook cannot call an MCP tool**, which is why the plugin talks to the
+API directly rather than through the server next door.
+
+One implementation, three manifests: Claude Code, VS Code, Cursor.
+
+---
+
+# Tool pruning
+
+Loaded tool definitions are billed on every request of every session,
+whether or not anything calls them.
+
+The plugin records which ones a session actually used, pools that
+**across the team**, and proposes a deny list once several people agree.
+
+One person not using a tool is a preference. Six people not using it
+across unrelated sessions is evidence.
+
+Nothing is removed without an explicit `agenthive toolprune apply`, and
+`restore` takes back exactly what was written — never a rule you added.
+
+---
+
 # Where the time goes
 
 Tokens are the visible cost. The expensive one is a retrieval that
@@ -239,7 +294,7 @@ errors nowhere, so there is a query for it.
 # What it deliberately is not
 
 - **No LLM-request proxy.** Two calls per session, not every call.
-- **No model in the write path.** No summarisation, no compression, no LLM reviewer.
+- **No model anywhere.** Not in the write path, not in the review path, not in the plugin — the loop guard counts repeated failures locally.
 - **No cross-team sharing.** Not configurable, enforced at the query layer.
 - **No automatic approval.** Only on a rule a human wrote.
 

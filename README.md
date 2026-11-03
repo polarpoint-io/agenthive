@@ -12,6 +12,48 @@ step-by-step walkthrough - install, create a team, add teammates, wire
 up an agent, review your first memory, and watch it work. This README is
 the concept/reference doc; that one is the "do this, in this order" doc.
 
+## Table of contents
+
+**Concepts**
+[What it actually does](#what-it-actually-does) ·
+[Where the savings come from](#where-the-savings-actually-come-from) ·
+[Progressive disclosure](#progressive-disclosure) ·
+[Reserved tags](#reserved-tags) ·
+[Withholding content](#withholding-content-from-a-memory-node)
+
+**Getting it running**
+[Running it](#running-it) ·
+[Setting up a team](#setting-up-a-team) ·
+[What a session calls](#what-an-agent-session-actually-calls) ·
+[Cursor / Claude Code via MCP](#hooking-up-cursor--claude-code-via-mcp) ·
+[Splitting out the review UI](#splitting-the-review-ui-into-its-own-container)
+
+**Evidence**
+[Does any of this help?](#does-any-of-this-help) ·
+[The holdout](#correlation-until-you-run-a-holdout) ·
+[Metrics](#metrics-does-this-actually-reduce-token-usage-and-get-reused) ·
+[Tracing](#tracing-what-actually-happened-for-this-call)
+
+**Learning**
+[Environment facts](#environment-facts) ·
+[Tool usage, pooled](#tool-usage-pooled-across-the-team) ·
+[Corroboration](#corroboration-was-it-still-true) ·
+[Anchor aliases](#anchor-aliases) ·
+[What the graph learns](#what-the-graph-learns-about-its-own-use)
+
+**Review**
+[Reviewing pending memory](#reviewing-pending-memory) ·
+[Automating the gate](#automating-the-review-gate) ·
+[Auto-approve rules](#auto-approve-rules-admin-only) ·
+[Managing users](#managing-users) ·
+[Azure AD sign-in](#azure-ad-sign-in-humans-only)
+
+**Reference**
+[Testing](#testing) ·
+[Not here yet](#whats-deliberately-not-here-yet) ·
+[Files](#files)
+
+
 ## Architecture
 
 A System Context view (who and what talks to AgentHive) and a Container
@@ -933,7 +975,9 @@ flagged as gaps at some point and are closed now - see `ADR.md`.
 - `tracing.py` - OpenTelemetry distributed tracing, off by default (see `ONBOARDING.md`/`OTEL_EXPORTER_OTLP_ENDPOINT`/`AGENTHIVE_TRACING_CONSOLE`)
 - `oidc.py` - Azure AD (Microsoft Entra ID) login for the review UI, humans only - PKCE, JWKS verification, off unless `AGENTHIVE_AZURE_*` is set
 - `db.py` - storage layer: SQLite and Postgres backends behind one schema, plus the access log behind reuse metrics
-- `retrieval.py` - the traversal algorithm, scoped to team + approved-only
+- `retrieval.py` - the traversal algorithm, scoped to team + approved-only, plus the index projection and anchor-alias resolution behind progressive disclosure
+- `governance.py` - the reserved tag vocabulary, `<private>` redaction, and the fact-length cap applied before anything is written
+- `insights.py` - everything the graph concludes about its own use: gap ranking, link suggestion, tier proposals, staleness, rule mining, review triage, holdout comparison, and tool pruning. Proposals only; nothing here applies itself
 - `server.py` - the HTTP API (stdlib `http.server`) + structured logging + health checks + TLS + tracing
 - `client.py` - what an agent session (or an admin script) actually calls; propagates trace context
 - `ui/index.html` - the review UI, served at `GET /ui` by default, or standalone via `ui/Dockerfile` (approve/reject, users, auto-approve rules, metrics)
@@ -943,7 +987,10 @@ flagged as gaps at some point and are closed now - see `ADR.md`.
 - `helm/agenthive/` - Kubernetes Helm chart (see its own README.md)
 - `.github/workflows/build.yml` - test, smoke-test the images, package the chart, and on `main` publish the images then the chart
 - `Makefile`, `.releaserc.json`, `commitlint.config.js`, `package.json` - the same local build/release tooling used across polarpoint-io
-- `docs/diagrams/` - C4 Context/Container diagrams (PlantUML source + rendered SVG)
+- `docs/diagrams/` - C4 Context/Container diagrams and the retrieval/improvement flows (PlantUML source + rendered SVG)
+- `docs/deck/` - the Marp deck, `make -C docs/deck` to build
+- `experiments/` - the benchmark harness: runs the same tasks with and without AgentHive and reports the difference with confidence intervals (see `experiments/README.md`)
+- `scripts/diagnose_tokens.py` - reads `/metrics` and tells you which number actually means a saving
 - `static/hero.svg` - the banner at the top of this file, hand-authored in the same style as the org's other MCP-server repos (see e.g. polarpoint-io/holmesgpt-runbook-mcp's docs/hero.svg)
 - `observability/` - Grafana dashboard + the metrics/tracing reference
 - `ONBOARDING.md` - step-by-step walkthrough for getting a real team from zero to using this

@@ -211,6 +211,45 @@ trip and buying nothing - agents are fetching everything they index, and
 they should go back to `retrieve_context`. That is a real possible
 outcome and the dashboard should be able to say so.
 
+| `agenthive_auto_index_total` | Retrievals the **server** switched to index mode because the full neighborhood was over `AGENTHIVE_AUTO_INDEX_OVER_TOKENS`. Opt-in disclosure was never chosen by agents in practice, so the decision moved server-side; this counter is how you see it happening. |
+
+## Environment facts
+
+The one path that **replaces** work instead of adding to context. A fact
+tagged `env-fact` is injected at session start with no anchor and no
+tool call, so the session never runs the exploration that would have
+discovered it. Everything else in AgentHive is additive; this is the
+subtractive half, and it is where a reduced token bill actually comes
+from.
+
+| Metric | Meaning |
+|---|---|
+| `agenthive_facts_served_total` | Sessions that received the fact preamble. |
+| `agenthive_fact_tokens_total` | Tokens spent on it. Capped per session - facts are length-limited at write time (200 characters), so this grows with sessions, not with the graph. |
+| `agenthive_tokens_injected_total` | Everything AgentHive put **into** a context window, across all paths. |
+
+`tokens_injected_total` exists to keep the other numbers honest. Read it
+next to `tokens_avoided_total`, never alone:
+
+```promql
+increase(agenthive_tokens_avoided_total[24h])
+  - increase(agenthive_tokens_injected_total[24h])
+```
+
+A positive result is a saving. A negative one means AgentHive is costing
+this team tokens, which is a thing it is allowed to say.
+
+## Tool usage, pooled
+
+Reported by the plugin's hooks, not by the server - the server only
+stores it. Pooling matters: one person not using a tool is a
+preference, several people not using it across unrelated sessions is
+evidence.
+
+Per-team detail is on `GET /insights/tools`; nothing is removed from
+anybody's config without an explicit `agenthive toolprune apply`, and
+`restore` takes back exactly what was written and nothing else.
+
 ## Governance counters
 
 | Metric | Meaning |
