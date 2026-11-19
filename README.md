@@ -255,16 +255,20 @@ auto-approve rule.
 
 ## Hooking up Cursor / Claude Code via MCP
 
-The instruction-block approach above works anywhere, but Cursor and Claude
-Code can also discover `retrieve_context` and `log_session` as native
-tools over [MCP](https://modelcontextprotocol.io) - no `CLAUDE.md` /
-`.cursor/rules` prose needed, the agent just sees them in its tool list.
+The instruction-block approach above works anywhere, but Cursor, Claude
+Code, Claude Desktop, and VS Code (via Copilot Chat) can also discover
+AgentHive's member-role calls as native tools over
+[MCP](https://modelcontextprotocol.io) - no `CLAUDE.md` / `.cursor/rules`
+prose needed, the agent just sees them in its tool list.
 
 That MCP server lives in its own repo,
 [agenthive-mcp](https://github.com/polarpoint-io/agenthive-mcp) - a thin
 local wrapper with its own dependency and release cadence, unrelated to
-this service's own container image, Helm chart, or CI matrix. See that
-repo's README for setup.
+this service's own container image, Helm chart, or CI matrix. It also
+ships a harness-level plugin (fact injection, tool pruning, a loop guard,
+a session-end logging backstop) and an `import-docs` CLI command for
+backfilling memory from an existing markdown repo. See that repo's README
+for setup and the full feature list.
 
 ## Progressive disclosure
 
