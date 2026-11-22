@@ -202,6 +202,17 @@ class TeamMemoryClient:
 
     # ---- admin: proposals from the graph's own use (see insights.py) ----
 
+    def suggest_aliases(self, min_overlap: int = 1, min_score: float = 0.15) -> dict:
+        """Gaps that probably already have an answer, just under another
+        phrasing - a scored guess for report_gaps entries, same spirit as
+        the README's own "pg pool dying" example. Never creates anything;
+        confirm a candidate with create_alias."""
+        return self._request(
+            "GET", "/teams/" + self._team_id() + "/suggestions/aliases",
+            query={"min_overlap": min_overlap, "min_score": min_score},
+            span_name="suggest_aliases",
+        )
+
     def suggest_links(self, min_shared: int = 3) -> dict:
         """Nodes repeatedly retrieved together but not linked."""
         return self._request(

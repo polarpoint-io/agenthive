@@ -218,6 +218,7 @@ ROUTES = [
     (re.compile(r"^/teams/(?P<team_id>[\w-]+)/aliases$"), "POST", "create_alias", "admin"),
     (re.compile(r"^/teams/(?P<team_id>[\w-]+)/aliases$"), "GET", "list_aliases", "admin"),
     (re.compile(r"^/teams/(?P<team_id>[\w-]+)/aliases/(?P<anchor_key>[^/]+)$"), "DELETE", "delete_alias", "admin"),
+    (re.compile(r"^/teams/(?P<team_id>[\w-]+)/suggestions/aliases$"), "GET", "suggest_aliases", "admin"),
     (re.compile(r"^/teams/(?P<team_id>[\w-]+)/suggestions/links$"), "GET", "suggest_links", "admin"),
     (re.compile(r"^/teams/(?P<team_id>[\w-]+)/suggestions/tiers$"), "GET", "suggest_tiers", "admin"),
     (re.compile(r"^/teams/(?P<team_id>[\w-]+)/suggestions/rules$"), "GET", "suggest_rules", "admin"),
@@ -1124,6 +1125,26 @@ class Handler(BaseHTTPRequestHandler):
         if CACHE is not None:
             CACHE.invalidate_team(params["team_id"])
         self._send(200, {"anchor_key": key, "deleted": True})
+        return 200
+
+    def h_suggest_aliases(self, params, query, user):
+        """Gaps that probably already have an answer under another name.
+        Admin-only, same as every other proposal here - this one reads
+        the gap list, not the approval gate, but it's still a step on the
+        way to admin.create_alias, which is."""
+        team_id = params["team_id"]
+        min_overlap = int((query.get("min_overlap") or [insights.DEFAULT_MIN_ALIAS_OVERLAP])[0])
+        min_score = float((query.get("min_score") or [insights.DEFAULT_MIN_ALIAS_SCORE])[0])
+        with tracing.TRACER.start_as_current_span("insights.aliases") as span:
+            rows = STORE.list_retrieval_misses(team_id, min_count=1, limit=100)
+            candidates = insights.suggest_aliases(
+                rows, STORE.approved_nodes(team_id),
+                existing_alias_keys=STORE.alias_map(team_id).keys(),
+                min_overlap=min_overlap, min_score=min_score,
+            )
+            span.set_attribute("agenthive.alias_candidate_count", len(candidates))
+        metrics.record_proposals("alias", len(candidates))
+        self._send(200, {"aliases": candidates, "min_overlap": min_overlap, "min_score": min_score})
         return 200
 
     def h_suggest_links(self, params, query, user):

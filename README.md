@@ -564,10 +564,11 @@ looking for and never find. Every approve and reject is a
 human-labelled example of what this team wants kept. All of it used to
 terminate in a dashboard.
 
-`insights.py` turns those signals into **proposals**. Four of them:
+`insights.py` turns those signals into **proposals**. Five of them:
 
 ```python
 client.report_gaps()        # [member] anchors that keep missing
+admin.suggest_aliases()     # gaps that probably already have an answer, under another name
 admin.suggest_links()       # nodes retrieved together but not linked
 admin.suggest_tiers()       # promote/demote by actual use, plus a prune list
 admin.suggest_rules()       # auto-approve rules your own decisions justify
@@ -582,6 +583,24 @@ session that happens to learn one of those things knows its
 `log_session` closes a standing gap. Entries marked `awaiting_review`
 already have an answer sitting unapproved, where the fix is a human
 clearing the queue rather than anyone writing it twice.
+
+### Aliases (suggested)
+
+`report_gaps` says an anchor keeps missing. It doesn't say which
+already-approved note probably answers it - a reviewer still has to read
+the gap list and guess a plausible title, same as the worked example
+above ("pg pool dying" against "Postgres connection pool exhaustion":
+zero containment either way, so resolution's own fallback correctly
+refuses it rather than risk a bad guess unattended).
+
+`suggest_aliases()` is that guess, scored instead of manual: Jaccard
+overlap of significant tokens between each missed anchor and every
+approved title, looser than resolution's own fallback on purpose - that
+one has to be conservative because it runs on every retrieval with
+nobody watching; this one is read by a human before `create_alias` is
+ever called, so a weaker signal is still worth surfacing. It creates
+nothing. An anchor already aliased drops off the list, since a reviewer
+has already made that call.
 
 ### Links
 
@@ -977,7 +996,7 @@ flagged as gaps at some point and are closed now - see `ADR.md`.
 - `db.py` - storage layer: SQLite and Postgres backends behind one schema, plus the access log behind reuse metrics
 - `retrieval.py` - the traversal algorithm, scoped to team + approved-only, plus the index projection and anchor-alias resolution behind progressive disclosure
 - `governance.py` - the reserved tag vocabulary, `<private>` redaction, and the fact-length cap applied before anything is written
-- `insights.py` - everything the graph concludes about its own use: gap ranking, link suggestion, tier proposals, staleness, rule mining, review triage, holdout comparison, and tool pruning. Proposals only; nothing here applies itself
+- `insights.py` - everything the graph concludes about its own use: gap ranking, alias candidates, link suggestion, tier proposals, staleness, rule mining, review triage, holdout comparison, and tool pruning. Proposals only; nothing here applies itself
 - `server.py` - the HTTP API (stdlib `http.server`) + structured logging + health checks + TLS + tracing
 - `client.py` - what an agent session (or an admin script) actually calls; propagates trace context
 - `ui/index.html` - the review UI, served at `GET /ui` by default, or standalone via `ui/Dockerfile` (approve/reject, users, auto-approve rules, metrics)
