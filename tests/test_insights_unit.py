@@ -87,6 +87,15 @@ def test_an_anchor_already_aliased_is_not_suggested_again():
     assert out == []
 
 
+def test_legacy_truncated_miss_rows_are_not_suggested():
+    rows = [{
+        **_gap("alpha beta " + "x" * 189),
+        "anchor_key": "alpha beta " + "x" * 189,
+    }]
+    nodes = [_approved_node("n1", "alpha beta answer")]
+    assert insights.suggest_aliases(rows, nodes) == []
+
+
 def test_the_best_of_several_candidates_wins():
     rows = [_gap("pool dying")]
     nodes = [

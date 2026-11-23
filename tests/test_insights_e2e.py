@@ -76,6 +76,19 @@ def test_a_gap_suggests_the_approved_note_that_probably_answers_it(live_server, 
     assert candidates[0]["node_title"] == "Postgres connection pool exhaustion"
 
 
+def test_long_aliasable_miss_preserves_its_full_anchor(live_server, client_lib):
+    c, _, _ = _team(client_lib, live_server)
+    node = _approved(c, "alpha beta gamma answer")
+    anchor = "alpha beta gamma " + "z" * 210
+    for _ in range(2):
+        c.retrieve_context(anchor)
+
+    candidates = c.suggest_aliases()["aliases"]
+    assert candidates[0]["anchor"] == anchor
+    c.create_alias(anchor, node["id"])
+    assert c.retrieve_context(anchor)["neighborhood"][0]["id"] == node["id"]
+
+
 def test_confirming_a_suggestion_is_still_a_separate_human_step(live_server, client_lib):
     """The endpoint only ever proposes - create_alias is what actually
     changes resolution, and that stays a deliberate second call."""

@@ -1000,8 +1000,8 @@ class Store:
         increment one row so the review UI can show what to title next."""
         from retrieval import slug
 
-        key = slug(anchor)[:200]
-        display = anchor.strip()[:200]
+        key = slug(anchor)
+        display = anchor.strip()
         if not key:
             return
         self.backend.execute(
@@ -1349,7 +1349,7 @@ class Store:
         all rather than a lock on the hot read path."""
         from retrieval import slug
 
-        key = slug(anchor)[:200]
+        key = slug(anchor)
         if not key:
             return 0
         row = self.backend.query_one(

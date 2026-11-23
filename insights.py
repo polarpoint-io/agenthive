@@ -152,6 +152,8 @@ def suggest_aliases(gap_rows, approved_nodes, existing_alias_keys=(),
     out = []
     for row in gap_rows:
         anchor = row["anchor"]
+        if len(anchor) == 200 or len(row.get("anchor_key", "")) == 200:
+            continue  # legacy miss rows may contain only a truncated phrase
         if slug(anchor) in existing:
             continue  # a reviewer already dealt with this one
         anchor_tokens = set(significant_tokens(anchor))
