@@ -1,3 +1,11 @@
+# [1.13.0](https://github.com/polarpoint-io/agenthive/compare/v1.12.0...v1.13.0) (2026-11-23)
+
+
+### Features
+
+* **insights:** suggest alias candidates from scored retrieval misses ([c7085cb](https://github.com/polarpoint-io/agenthive/commit/c7085cbcf02f567f4f2a4a26d4dd40fc81ba82c2))
+* **insights:** suggest alias candidates from scored retrieval misses ([d90735d](https://github.com/polarpoint-io/agenthive/commit/d90735d2cb26ee7cec3b3026107297c5859f687b))
+
 # [1.12.0](https://github.com/polarpoint-io/agenthive/compare/v1.11.0...v1.12.0) (2026-11-02)
 
 
