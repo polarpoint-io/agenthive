@@ -9,13 +9,15 @@ looking for and never find; and every approve/reject is a human-labelled
 example of what this team does and does not want kept. All of it
 currently terminates in a dashboard.
 
-This module turns those signals into PROPOSALS. Four of them:
+This module turns those signals into PROPOSALS. Five of them:
 
   1. gaps          - anchors that keep missing, and whether something
                      already pending would have answered them
-  2. link edges    - nodes repeatedly retrieved together but not linked
-  3. tiers         - which nodes earned promotion, which went cold
-  4. rules         - auto-approve rules the team's own decisions justify
+  2. aliases       - gaps that probably already have an answer, just
+                     under a phrasing retrieval's own fallback won't risk
+  3. link edges    - nodes repeatedly retrieved together but not linked
+  4. tiers         - which nodes earned promotion, which went cold
+  5. rules         - auto-approve rules the team's own decisions justify
 
 TWO RULES THIS MODULE IS BUILT AROUND
 -------------------------------------
@@ -36,7 +38,17 @@ tier is metadata about how a node is USED, never a word of its content.
 """
 
 from governance import NEVER_AUTO_APPROVE, needs_human
-from retrieval import pending_title_match, slug
+from retrieval import pending_title_match, significant_tokens, slug
+
+# Alias candidates are read by a human before anything happens, so the
+# bar is deliberately lower than retrieval's own fallback (which requires
+# a strict subset match because it runs unattended on every call). The
+# score is Jaccard overlap of significant tokens; 0.15 is low enough to
+# catch the README's own worked example ("pg pool dying" against
+# "Postgres connection pool exhaustion" - one token in six) while still
+# dropping a single word shared with an otherwise unrelated title.
+DEFAULT_MIN_ALIAS_OVERLAP = 1
+DEFAULT_MIN_ALIAS_SCORE = 0.15
 
 # A pair of nodes has to co-occur in several DIFFERENT retrievals before
 # it means anything. Two nodes served together once are a coincidence of
@@ -106,6 +118,73 @@ def rank_gaps(miss_rows, pending_nodes, min_count: int = 2) -> list:
         })
     gaps.sort(key=lambda g: (not g["awaiting_review"], -g["miss_count"]))
     return gaps
+
+
+def suggest_aliases(gap_rows, approved_nodes, existing_alias_keys=(),
+                     min_overlap: int = DEFAULT_MIN_ALIAS_OVERLAP,
+                     min_score: float = DEFAULT_MIN_ALIAS_SCORE) -> list:
+    """Gaps that probably already have an answer, just under another name.
+
+    report_gaps says an anchor keeps missing. It does not say which
+    already-approved note probably answers it - a reviewer still has to
+    read the gap list and guess a plausible title, same as the README's
+    own worked example ("pg pool dying" vs "Postgres connection pool
+    exhaustion": zero containment either way, so retrieval's own fallback
+    in retrieval.py correctly refuses it rather than risk a bad guess
+    unattended).
+
+    This is that guess, scored instead of manual: Jaccard overlap of
+    significant tokens between the missed anchor and every approved
+    title. Looser than retrieval's fallback on purpose - that one has to
+    be conservative because it runs on every retrieval with nobody
+    watching; this one is read by a human before create_alias ever gets
+    called, so a weaker signal is still worth surfacing. It never
+    creates anything - aliasing stays a one-click human decision, same
+    as every other proposal here."""
+    existing = {slug(a) for a in existing_alias_keys}
+
+    titles = []
+    for node in approved_nodes:
+        tokens = set(significant_tokens(node["title"]))
+        if tokens:
+            titles.append((node, tokens))
+
+    out = []
+    for row in gap_rows:
+        anchor = row["anchor"]
+        if len(anchor) == 200 or len(row.get("anchor_key", "")) == 200:
+            continue  # legacy miss rows may contain only a truncated phrase
+        if slug(anchor) in existing:
+            continue  # a reviewer already dealt with this one
+        anchor_tokens = set(significant_tokens(anchor))
+        if not anchor_tokens:
+            continue
+
+        best = None
+        for node, tokens in titles:
+            shared = anchor_tokens & tokens
+            if len(shared) < min_overlap:
+                continue
+            score = len(shared) / float(len(anchor_tokens | tokens))
+            if score < min_score:
+                continue
+            if best is None or score > best[0]:
+                best = (score, node, shared)
+
+        if best is None:
+            continue
+        score, node, shared = best
+        out.append({
+            "anchor": anchor,
+            "miss_count": row.get("miss_count"),
+            "node_id": node["id"],
+            "node_title": node["title"],
+            "shared_tokens": sorted(shared),
+            "score": round(score, 3),
+        })
+
+    out.sort(key=lambda r: (-r["score"], -(r["miss_count"] or 0)))
+    return out
 
 
 def suggest_links(pairs, nodes, min_shared: int = DEFAULT_MIN_SHARED) -> list:

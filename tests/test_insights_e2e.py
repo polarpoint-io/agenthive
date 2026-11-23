@@ -63,6 +63,55 @@ def test_gaps_are_member_level(live_server, client_lib):
     assert len(mc.report_gaps()["gaps"]) == 1
 
 
+# --- aliases (suggested) ----------------------------------------------
+
+def test_a_gap_suggests_the_approved_note_that_probably_answers_it(live_server, client_lib):
+    c, _, _ = _team(client_lib, live_server)
+    _approved(c, "Postgres connection pool exhaustion")
+    for _ in range(2):
+        c.retrieve_context("pg pool dying")
+
+    candidates = c.suggest_aliases()["aliases"]
+    assert candidates[0]["anchor"] == "pg pool dying"
+    assert candidates[0]["node_title"] == "Postgres connection pool exhaustion"
+
+
+def test_long_aliasable_miss_preserves_its_full_anchor(live_server, client_lib):
+    c, _, _ = _team(client_lib, live_server)
+    node = _approved(c, "alpha beta gamma answer")
+    anchor = "alpha beta gamma " + "z" * 210
+    for _ in range(2):
+        c.retrieve_context(anchor)
+
+    candidates = c.suggest_aliases()["aliases"]
+    assert candidates[0]["anchor"] == anchor
+    c.create_alias(anchor, node["id"])
+    assert c.retrieve_context(anchor)["neighborhood"][0]["id"] == node["id"]
+
+
+def test_confirming_a_suggestion_is_still_a_separate_human_step(live_server, client_lib):
+    """The endpoint only ever proposes - create_alias is what actually
+    changes resolution, and that stays a deliberate second call."""
+    c, _, _ = _team(client_lib, live_server)
+    node = _approved(c, "Postgres connection pool exhaustion")
+    for _ in range(2):
+        c.retrieve_context("pg pool dying")
+
+    assert c.retrieve_context("pg pool dying")["neighborhood_count"] == 0
+    c.create_alias("pg pool dying", node["id"])
+    assert c.retrieve_context("pg pool dying")["neighborhood_count"] == 1
+
+
+def test_an_already_aliased_gap_drops_off_the_suggestion_list(live_server, client_lib):
+    c, _, _ = _team(client_lib, live_server)
+    node = _approved(c, "Postgres connection pool exhaustion")
+    for _ in range(2):
+        c.retrieve_context("pg pool dying")
+    c.create_alias("pg pool dying", node["id"])
+
+    assert c.suggest_aliases()["aliases"] == []
+
+
 # --- links ------------------------------------------------------------
 
 def test_co_retrieved_but_unlinked_nodes_are_suggested(live_server, client_lib):
@@ -197,7 +246,7 @@ def test_suggestions_are_admin_only(live_server, client_lib):
     member = c.create_user("alice", role="member")
     mc = client_lib.TeamMemoryClient(live_server, member["token"], team["id"])
 
-    for call in (mc.suggest_rules, mc.suggest_tiers, mc.suggest_links):
+    for call in (mc.suggest_rules, mc.suggest_tiers, mc.suggest_links, mc.suggest_aliases):
         with pytest.raises(RuntimeError, match="403"):
             call()
 

@@ -50,6 +50,77 @@ def test_an_answer_already_in_the_queue_sorts_first():
     assert gaps[1]["awaiting_review"] is False
 
 
+# --- aliases ------------------------------------------------------------
+
+def _gap(anchor, miss_count=3):
+    return {"anchor": anchor, "miss_count": miss_count, "last_missed_at": "x"}
+
+
+def _approved_node(node_id, title):
+    return {"id": node_id, "title": title}
+
+
+def test_a_weak_but_real_overlap_is_still_suggested():
+    """The README's own worked example: zero containment either way, so
+    retrieval's own fallback correctly refuses it - but "pool" is a real
+    shared signal a human can act on in a second."""
+    rows = [_gap("pg pool dying")]
+    nodes = [_approved_node("n1", "Postgres connection pool exhaustion")]
+    out = insights.suggest_aliases(rows, nodes)
+    assert len(out) == 1
+    assert out[0]["node_id"] == "n1"
+    assert out[0]["shared_tokens"] == ["pool"]
+
+
+def test_no_shared_tokens_is_not_suggested():
+    rows = [_gap("totally unrelated phrase")]
+    nodes = [_approved_node("n1", "Postgres connection pool exhaustion")]
+    assert insights.suggest_aliases(rows, nodes) == []
+
+
+def test_an_anchor_already_aliased_is_not_suggested_again():
+    """A reviewer already made a decision on this one; re-proposing it
+    would just be noise in the same list that's supposed to save time."""
+    rows = [_gap("pg pool dying")]
+    nodes = [_approved_node("n1", "Postgres connection pool exhaustion")]
+    out = insights.suggest_aliases(rows, nodes, existing_alias_keys=["pg pool dying"])
+    assert out == []
+
+
+def test_legacy_truncated_miss_rows_are_not_suggested():
+    rows = [{
+        **_gap("alpha beta " + "x" * 189),
+        "anchor_key": "alpha beta " + "x" * 189,
+    }]
+    nodes = [_approved_node("n1", "alpha beta answer")]
+    assert insights.suggest_aliases(rows, nodes) == []
+
+
+def test_the_best_of_several_candidates_wins():
+    rows = [_gap("pool dying")]
+    nodes = [
+        _approved_node("weak", "Connection pool"),       # 1 of 2 tokens shared
+        _approved_node("strong", "Postgres pool dying"), # 2 of 2 tokens shared
+    ]
+    out = insights.suggest_aliases(rows, nodes)
+    assert out[0]["node_id"] == "strong"
+
+
+def test_a_score_below_the_floor_is_not_suggested():
+    """One token shared between an otherwise unrelated anchor and an
+    otherwise unrelated title is still noise, however real that one
+    overlapping word is on its own."""
+    rows = [_gap("pool party for the team offsite")]
+    nodes = [_approved_node("n1", "A fairly long title about something else entirely with pool in it")]
+    assert insights.suggest_aliases(rows, nodes) == []
+
+
+def test_gaps_with_no_significant_tokens_are_skipped():
+    rows = [_gap("a")]  # single short stopword-length token
+    nodes = [_approved_node("n1", "Anything")]
+    assert insights.suggest_aliases(rows, nodes) == []
+
+
 # --- links ------------------------------------------------------------
 
 def _node(node_id, title, links=()):
