@@ -1136,7 +1136,8 @@ class Handler(BaseHTTPRequestHandler):
         min_overlap = int((query.get("min_overlap") or [insights.DEFAULT_MIN_ALIAS_OVERLAP])[0])
         min_score = float((query.get("min_score") or [insights.DEFAULT_MIN_ALIAS_SCORE])[0])
         with tracing.TRACER.start_as_current_span("insights.aliases") as span:
-            rows = STORE.list_retrieval_misses(team_id, min_count=1, limit=100)
+            rows = STORE.list_retrieval_misses(
+                team_id, min_count=1, limit=100, exclude_aliased=True)
             candidates = insights.suggest_aliases(
                 rows, STORE.approved_nodes(team_id),
                 existing_alias_keys=STORE.alias_map(team_id).keys(),

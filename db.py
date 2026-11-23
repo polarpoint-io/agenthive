@@ -1370,16 +1370,24 @@ class Store:
     # Postgres. The analysis itself lives in insights.py as pure
     # functions over these rows, so it can be tested without a database.
 
-    def list_retrieval_misses(self, team_id: str, min_count: int = 1, limit: int = 50):
+    def list_retrieval_misses(self, team_id: str, min_count: int = 1, limit: int = 50,
+                              exclude_aliased: bool = False):
         """Anchors that returned nothing, most-missed first.
 
         Already aggregated per (team, anchor_key) by
         record_retrieval_miss, so this is the gap signal in its final
         form - no scan of a per-call log."""
+        alias_filter = ""
+        if exclude_aliased:
+            alias_filter = (
+                "AND NOT EXISTS (SELECT 1 FROM anchor_aliases a "
+                "WHERE a.team_id = m.team_id AND a.anchor_key = m.anchor_key) "
+            )
         return self.backend.query_all(
-            "SELECT anchor, anchor_key, miss_count, last_missed_at "
-            "FROM retrieval_misses WHERE team_id = ? AND miss_count >= ? "
-            "ORDER BY miss_count DESC, last_missed_at DESC LIMIT ?",
+            "SELECT m.anchor, m.anchor_key, m.miss_count, m.last_missed_at "
+            "FROM retrieval_misses m WHERE m.team_id = ? AND m.miss_count >= ? "
+            + alias_filter +
+            "ORDER BY m.miss_count DESC, m.last_missed_at DESC LIMIT ?",
             (team_id, min_count, limit),
         )
 
