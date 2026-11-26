@@ -112,6 +112,24 @@ def test_ui_is_served(live_server):
         assert "AgentHive" in body
 
 
+def test_ui_users_card_can_rotate_tokens(live_server):
+    """Create user was the only way to get a token out of the UI, so an
+    admin whose own token expired or was revoked had no way to reissue it
+    without hand-written API calls. The Users card must call the existing
+    rotate route and show the new token through the same once-only box as
+    Create user."""
+    import urllib.request
+
+    with urllib.request.urlopen(live_server + "/ui") as resp:
+        body = resp.read().decode("utf-8")
+    assert "rotateUser(" in body
+    assert "/rotate'" in body
+    assert "Rotate token" in body
+    # Create user and Rotate token share one renderer so neither can show a
+    # token without the "shown once" warning.
+    assert body.count("showNewToken(") >= 3  # definition + create + rotate
+
+
 def test_cors_enabled_by_default(live_server):
     """A UI hosted on a different origin (see ui/Dockerfile) needs both a
     successful preflight and Access-Control-Allow-Origin on the actual

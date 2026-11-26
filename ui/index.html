@@ -272,6 +272,8 @@ async function loadUsers(){
     const box = document.getElementById('usersList');
     if (!users.length){ box.className='empty'; box.textContent='No users yet.'; return; }
     box.className = '';
+    usersById = {};
+    users.forEach(u => { usersById[u.id] = u; });
     box.innerHTML = '<table><tr><th>Name</th><th>Role</th><th>Status</th><th>Azure AD</th><th></th></tr>' + users.map(u => `
       <tr>
         <td>${escapeHtml(u.name)}</td>
@@ -279,6 +281,7 @@ async function loadUsers(){
         <td>${u.revoked_at ? 'revoked' : 'active'}</td>
         <td>${u.azure_oid ? '<span class="pill">linked</span>' : '<span class="sub">not linked</span>'}</td>
         <td>
+          <button class="secondary" onclick="rotateUser('${u.id}')">${u.revoked_at ? 'Reissue token' : 'Rotate token'}</button>
           ${u.revoked_at ? '' : `<button class="secondary" onclick="revokeUser('${u.id}')">Revoke</button>`}
           ${u.azure_oid
             ? `<button class="secondary" onclick="unlinkAzure('${u.id}')">Unlink Azure</button>`
@@ -294,9 +297,38 @@ async function createUser(){
   try {
     const u = await api('/teams/' + conn.teamId + '/users', {method:'POST', body: JSON.stringify({name, role})});
     document.getElementById('newUserName').value = '';
-    const box = document.getElementById('newTokenBox');
-    box.style.display = 'block';
-    box.innerHTML = `Token for <b>${escapeHtml(name)}</b> (copy now, shown once): <code>${u.token}</code>`;
+    showNewToken(name, u.token, u.token_expires_at);
+    await loadUsers();
+  } catch(e){ showStatus(e.message, 'err'); }
+}
+
+// One place that renders a freshly issued token, for both Create user and
+// Rotate token. The server returns the token exactly once and stores only a
+// hash, so this box is the only chance to copy it.
+let usersById = {};
+function showNewToken(name, token, expiresAt){
+  const box = document.getElementById('newTokenBox');
+  box.style.display = 'block';
+  const expiry = expiresAt ? ` Expires ${escapeHtml(expiresAt)}.` : ' Does not expire.';
+  box.innerHTML = `Token for <b>${escapeHtml(name)}</b> (copy now, shown once): <code id="newTokenValue">${escapeHtml(token)}</code>` +
+    ` <button class="secondary" onclick="copyNewToken()">Copy</button>` +
+    `<div class="sub">${expiry}</div>`;
+}
+async function copyNewToken(){
+  const el = document.getElementById('newTokenValue');
+  if (!el) return;
+  try { await navigator.clipboard.writeText(el.textContent); showStatus('Token copied.', 'ok'); }
+  catch(e){ showStatus('Copy failed - select the token and copy it by hand.', 'err'); }
+}
+async function rotateUser(id){
+  const u = usersById[id] || {name: id};
+  const verb = u.revoked_at ? 'Reissue' : 'Rotate';
+  if (!confirm(verb + ' the token for ' + u.name + '? Their current token stops working immediately, ' +
+               'so anything using it (MCP config, hooks, scripts) must be updated with the new one. ' +
+               'If you are connected to this page with that token, reconnect with the new one.')) return;
+  try {
+    const r = await api('/teams/' + conn.teamId + '/users/' + id + '/rotate', {method:'POST', body:'{}'});
+    showNewToken(u.name, r.token, r.token_expires_at);
     await loadUsers();
   } catch(e){ showStatus(e.message, 'err'); }
 }
