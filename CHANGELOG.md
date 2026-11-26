@@ -1,3 +1,16 @@
+# [1.14.0](https://github.com/polarpoint-io/agenthive/compare/v1.13.0...v1.14.0) (2026-11-26)
+
+
+### Bug Fixes
+
+* implement user token rotation and revocation logic ([dc0667e](https://github.com/polarpoint-io/agenthive/commit/dc0667ed4d257c9eba4c6344f883bf67809029cd))
+
+
+### Features
+
+* **ui:** rotate or reissue a user's token from the Users card ([662f0b0](https://github.com/polarpoint-io/agenthive/commit/662f0b02b79fb50c8a47366a345c8f0fd90b68af))
+* **ui:** rotate or reissue a user's token from the Users card ([1d3ef5e](https://github.com/polarpoint-io/agenthive/commit/1d3ef5e6da58d577725d0b4f842bc4965094ec44))
+
 # [1.13.0](https://github.com/polarpoint-io/agenthive/compare/v1.12.0...v1.13.0) (2026-11-23)
 
 
