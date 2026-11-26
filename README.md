@@ -799,6 +799,13 @@ A `member` can log and retrieve memory, and manage agents/tasks. Only an
 `admin` can review pending memory, manage users, or configure
 auto-approve rules. Any user can rotate their own token.
 
+An admin can do the same from the review UI. The Users card has **Create
+user** and a per-user **Rotate token** (**Reissue token** for a revoked
+user, since rotating clears the revocation). The new token is shown once,
+with a Copy button. This matters most for an admin whose own token expired:
+sign in with Microsoft, open the Users card, and rotate yourself. The old
+token stops working immediately, so update whatever uses it.
+
 ## Azure AD sign-in (humans only)
 
 Agents keep using their personal tokens exactly as above. Humans using the
