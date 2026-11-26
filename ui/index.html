@@ -320,17 +320,21 @@ async function copyNewToken(){
   try { await navigator.clipboard.writeText(el.textContent); showStatus('Token copied.', 'ok'); }
   catch(e){ showStatus('Copy failed - select the token and copy it by hand.', 'err'); }
 }
+const rotationsInFlight = new Set();
 async function rotateUser(id){
+  if (rotationsInFlight.has(id)) return;
   const u = usersById[id] || {name: id};
   const verb = u.revoked_at ? 'Reissue' : 'Rotate';
   if (!confirm(verb + ' the token for ' + u.name + '? Their current token stops working immediately, ' +
                'so anything using it (MCP config, hooks, scripts) must be updated with the new one. ' +
                'If you are connected to this page with that token, reconnect with the new one.')) return;
+  rotationsInFlight.add(id);
   try {
     const r = await api('/teams/' + conn.teamId + '/users/' + id + '/rotate', {method:'POST', body:'{}'});
     showNewToken(u.name, r.token, r.token_expires_at);
     await loadUsers();
   } catch(e){ showStatus(e.message, 'err'); }
+  finally { rotationsInFlight.delete(id); }
 }
 async function revokeUser(id){
   if (!confirm('Revoke this user\'s access?')) return;
